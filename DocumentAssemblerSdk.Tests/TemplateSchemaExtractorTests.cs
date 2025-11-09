@@ -228,14 +228,42 @@ namespace DocumentAssemblerSdk.Tests
                 XmlTemplate = "<Data><Customer><Name>[value]</Name></Customer></Data>"
             };
 
+            result.XsdMarkup = "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"><xs:element name=\"Customer\" /></xs:schema>";
+
             // Act
             var formatted = result.ToFormattedXml();
+            var formattedXsd = result.ToFormattedXsd();
 
             // Assert
             Assert.NotNull(formatted);
             Assert.Contains("Data", formatted);
             Assert.Contains("Customer", formatted);
             Assert.Contains("Name", formatted);
+            Assert.NotNull(formattedXsd);
+            Assert.Contains("xs:schema", formattedXsd);
+        }
+
+        [Fact]
+        public void ExtractXmlSchema_ShouldEmitOptionalAwareXsd()
+        {
+            // Arrange
+            var template = CreateTemplateDocumentWithTags(
+                "<#Content Select=\"Customer/Name\" Optional=\"false\"#>",
+                "<#Content Select=\"Customer/PreferredName\" Optional=\"true\"#>",
+                "<#Repeat Select=\"Customer/Orders\" Optional=\"true\"#>",
+                "<#Content Select=\"Customer/Orders/Product\" Optional=\"false\"#>",
+                "<#EndRepeat#>"
+            );
+
+            // Act
+            var result = TemplateSchemaExtractor.ExtractXmlSchema(template);
+
+            // Assert
+            Assert.NotNull(result);
+            Assert.False(string.IsNullOrWhiteSpace(result.XsdMarkup));
+            Assert.Contains("name=\"PreferredName\" type=\"xs:string\" minOccurs=\"0\" />", result.XsdMarkup);
+            Assert.Contains("name=\"Name\" type=\"xs:string\" />", result.XsdMarkup);
+            Assert.Contains("name=\"Orders\" minOccurs=\"0\" maxOccurs=\"unbounded\">", result.XsdMarkup);
         }
 
         [Fact]
@@ -330,6 +358,23 @@ namespace DocumentAssemblerSdk.Tests
 
             var bytes = ms.ToArray();
             return new WmlDocument("Empty.docx", bytes);
+        }
+
+        private static WmlDocument CreateTemplateDocumentWithTags(params string[] tags)
+        {
+            using var ms = new MemoryStream();
+            using (var wordDoc = WordprocessingDocument.Create(ms, DocumentFormat.OpenXml.WordprocessingDocumentType.Document))
+            {
+                var mainPart = wordDoc.AddMainDocumentPart();
+                var body = new Body(tags.Select(tag =>
+                    new Paragraph(
+                        new Run(
+                            new Text(tag) { Space = DocumentFormat.OpenXml.SpaceProcessingModeValues.Preserve }))));
+                mainPart.Document = new Document(body);
+                mainPart.Document.Save();
+            }
+
+            return new WmlDocument($"SchemaDoc-{Guid.NewGuid()}.docx", ms.ToArray());
         }
     }
 }

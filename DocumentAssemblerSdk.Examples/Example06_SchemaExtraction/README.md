@@ -146,6 +146,7 @@ var result = TemplateSchemaExtractor.ExtractXmlSchema(templateDoc);
 Console.WriteLine($"Root: {result.RootElementName}");
 Console.WriteLine($"Fields: {result.Fields.Count}");
 Console.WriteLine($"XML:\n{result.ToFormattedXml()}");
+Console.WriteLine($"XSD:\n{result.ToFormattedXsd()}");
 
 // Analyze fields
 foreach (var field in result.Fields)
@@ -165,6 +166,7 @@ foreach (var field in result.Fields)
 - **Conditional field handling** - Detects but doesn't include conditionals as data fields
 - **Image placeholder support** - Identifies image fields and adds Base64 comments
 - **Attribute preservation** - Captures all tag attributes (Match, NotMatch, Align, etc.)
+- **XSD output** - Emits optional-aware XSD (`minOccurs`/`maxOccurs`) for DTO/validation generation
 
 ## Notes
 

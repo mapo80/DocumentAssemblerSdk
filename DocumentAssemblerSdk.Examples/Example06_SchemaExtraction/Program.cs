@@ -77,6 +77,15 @@ namespace Example06_SchemaExtraction
             );
             File.WriteAllText(outputPath, result.ToFormattedXml());
             Console.WriteLine($"\nSchema saved to: {Path.GetFileName(outputPath)}");
+
+            var formattedXsd = result.ToFormattedXsd();
+            var xsdOutputPath = Path.ChangeExtension(outputPath, ".xsd");
+            File.WriteAllText(xsdOutputPath, formattedXsd);
+            Console.WriteLine($"\nXSD saved to: {Path.GetFileName(xsdOutputPath)}");
+
+            Console.WriteLine("\nGenerated XSD Schema:");
+            Console.WriteLine("---------------------");
+            Console.WriteLine(formattedXsd);
         }
 
         /// <summary>

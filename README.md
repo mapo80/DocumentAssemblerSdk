@@ -521,6 +521,8 @@ Product: Basic Widget
 
 **NEW**: Extract required XML schema from existing DOCX templates! This feature analyzes your templates and automatically generates the XML structure needed to populate them.
 
+It now also emits an optional-aware XSD (`result.XsdMarkup` or `result.ToFormattedXsd()`) so you can generate DTOs or validation artifacts that respect `minOccurs`/`maxOccurs` dictated by optional and repeating fields.
+
 ### Use Cases
 
 - **Reverse-engineer templates** - Understand what data a template needs
@@ -542,6 +544,10 @@ var result = TemplateSchemaExtractor.ExtractXmlSchema(templateDoc);
 
 // Get formatted XML template
 Console.WriteLine(result.ToFormattedXml());
+
+// Get formatted XSD schema for DTO generation
+Console.WriteLine("\nGenerated XSD:");
+Console.WriteLine(result.ToFormattedXsd());
 
 // Analyze discovered fields
 Console.WriteLine($"Found {result.Fields.Count} field(s)");
@@ -586,6 +592,31 @@ The extractor generates:
 </Data>
 ```
 
+### Sample XSD Output
+
+```xml
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="Customer">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="Name" type="xs:string" minOccurs="0" />
+        <xs:element name="Email" type="xs:string" minOccurs="0" />
+        <xs:element name="Orders" minOccurs="0" maxOccurs="unbounded">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="Product" type="xs:string" minOccurs="0" />
+              <xs:element name="Quantity" type="xs:string" minOccurs="0" />
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>
+```
+
+Optional fields surface as `minOccurs="0"`, and repeating structures gain `maxOccurs="unbounded"` so DTO generators can detect arrays.
+
 ### Features
 
 - ✅ **Ultra-fast** - Single-pass extraction (< 100ms typical)
@@ -595,6 +626,7 @@ The extractor generates:
 - ✅ **Repeating structure detection** - Identifies Repeat/Table collections
 - ✅ **Hierarchical XML generation** - Builds proper nested structure
 - ✅ **Smart root element inference** - Detects common root element name
+- ✅ **Optional-aware XSD output** - Includes `minOccurs`/`maxOccurs` hints so you can generate DTOs from `result.XsdMarkup`
 
 See [Example06_SchemaExtraction](DocumentAssemblerSdk.Examples/Example06_SchemaExtraction/) for a complete working example.
 

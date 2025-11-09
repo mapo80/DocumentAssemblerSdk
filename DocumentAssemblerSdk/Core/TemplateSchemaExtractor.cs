@@ -45,6 +45,11 @@ namespace DocumentAssembler.Core
             public string RootElementName { get; set; } = "Data";
 
             /// <summary>
+            /// Generated XSD markup (optional-aware)
+            /// </summary>
+            public string XsdMarkup { get; set; } = string.Empty;
+
+            /// <summary>
             /// Generates a formatted, indented XML string
             /// </summary>
             public string ToFormattedXml()
@@ -57,6 +62,22 @@ namespace DocumentAssembler.Core
                 catch
                 {
                     return XmlTemplate;
+                }
+            }
+
+            /// <summary>
+            /// Generates a formatted, indented XSD string
+            /// </summary>
+            public string ToFormattedXsd()
+            {
+                try
+                {
+                    var doc = XDocument.Parse(XsdMarkup);
+                    return doc.ToString();
+                }
+                catch
+                {
+                    return XsdMarkup;
                 }
             }
         }
@@ -147,13 +168,16 @@ namespace DocumentAssembler.Core
             }
 
             // Build hierarchical XML structure efficiently
+            var sortedFields = fields.Values.OrderBy(f => f.XPath).ToList();
             var result = new SchemaExtractionResult
             {
-                Fields = fields.Values.OrderBy(f => f.XPath).ToList()
+                Fields = sortedFields
             };
 
-            result.XmlTemplate = BuildXmlTemplate(result.Fields, repeatingPaths);
-            result.RootElementName = DetermineRootElementName(result.Fields);
+            result.RootElementName = DetermineRootElementName(sortedFields);
+            var fieldTree = BuildFieldTree(sortedFields, repeatingPaths);
+            result.XmlTemplate = sortedFields.Count == 0 ? "<Data />" : BuildXmlFromTree(fieldTree);
+            result.XsdMarkup = BuildXsdTemplate(fieldTree, result.RootElementName);
 
             return result;
         }
@@ -366,63 +390,149 @@ namespace DocumentAssembler.Core
         }
 
         /// <summary>
-        /// Builds XML template from discovered fields with optimal performance
+        /// Builds a tree representation of the discovered fields
         /// </summary>
-        private static string BuildXmlTemplate(List<FieldInfo> fields, HashSet<string> repeatingPaths)
+        private static XmlNode BuildFieldTree(List<FieldInfo> fields, HashSet<string> repeatingPaths)
         {
-            if (fields.Count == 0)
+            var root = new XmlNode
             {
-                return "<Data />";
-            }
-
-            // Build hierarchical structure efficiently using a tree
-            var root = new XmlNode { Name = "Data", Children = new Dictionary<string, XmlNode>(StringComparer.OrdinalIgnoreCase) };
+                Name = "Data",
+                Children = new Dictionary<string, XmlNode>(StringComparer.OrdinalIgnoreCase)
+            };
 
             foreach (var field in fields)
             {
-                // Skip Conditional and other non-data tags
                 if (field.TagType == "Conditional") continue;
 
-                var parts = field.XPath.Split('/');
+                var parts = field.XPath.Split('/')
+                    .Select(p => p.Trim())
+                    .Where(p => !string.IsNullOrWhiteSpace(p) && p != "." && !p.StartsWith("-") && !char.IsDigit(p[0]))
+                    .ToList();
+
+                if (parts.Count == 0) continue;
+
                 var currentNode = root;
+                var pathSegments = new List<string>();
 
-                for (int i = 0; i < parts.Length; i++)
+                for (int i = 0; i < parts.Count; i++)
                 {
-                    var part = parts[i].Trim();
-                    if (string.IsNullOrWhiteSpace(part) || part == ".") continue; // Skip empty and current directory marker
+                    var part = parts[i];
+                    pathSegments.Add(part);
+                    var pathKey = string.Join("/", pathSegments);
 
-                    // Skip parts that would create invalid XML element names
-                    if (part.StartsWith("-") || char.IsDigit(part[0]))
+                    if (!currentNode.Children.TryGetValue(part, out var childNode))
                     {
-                        continue;
-                    }
-
-                    if (!currentNode.Children.ContainsKey(part))
-                    {
-                        currentNode.Children[part] = new XmlNode
+                        childNode = new XmlNode
                         {
                             Name = part,
                             Children = new Dictionary<string, XmlNode>(StringComparer.OrdinalIgnoreCase),
-                            IsRepeating = repeatingPaths.Contains(string.Join("/", parts.Take(i + 1)))
+                            IsRepeating = repeatingPaths.Contains(pathKey)
                         };
+                        currentNode.Children[part] = childNode;
+                    }
+                    else if (!childNode.IsRepeating && repeatingPaths.Contains(pathKey))
+                    {
+                        childNode.IsRepeating = true;
                     }
 
-                    currentNode = currentNode.Children[part];
+                    currentNode = childNode;
 
-                    // Mark as leaf if this is the last part and it's a content field
-                    if (i == parts.Length - 1 && (field.TagType == "Content" || field.TagType == "Image"))
+                    var isLeafNode = i == parts.Count - 1;
+                    if (isLeafNode)
                     {
-                        currentNode.IsLeaf = true;
                         currentNode.IsOptional = field.IsOptional;
-                        currentNode.FieldType = field.TagType;
+                        if (field.TagType == "Content" || field.TagType == "Image")
+                        {
+                            currentNode.IsLeaf = true;
+                            currentNode.FieldType = field.TagType;
+                        }
                     }
                 }
             }
 
-            // Generate XML string efficiently
+            return root;
+        }
+
+        /// <summary>
+        /// Builds XML markup from the tree representation
+        /// </summary>
+        private static string BuildXmlFromTree(XmlNode root)
+        {
             var sb = new StringBuilder();
             BuildXmlString(root, sb, 0);
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// Builds optional-aware XSD markup from the tree representation
+        /// </summary>
+        private static string BuildXsdTemplate(XmlNode root, string rootElementName)
+        {
+            var startNode = root;
+            if (!string.Equals(rootElementName, root.Name, StringComparison.OrdinalIgnoreCase) &&
+                root.Children.TryGetValue(rootElementName, out var candidate))
+            {
+                startNode = candidate;
+            }
+
+            var sb = new StringBuilder();
+            sb.AppendLine(@"<?xml version=""1.0"" encoding=""utf-8""?>");
+            sb.AppendLine(@"<xs:schema xmlns:xs=""http://www.w3.org/2001/XMLSchema"">");
+            BuildXsdElement(startNode, sb, 1, true);
+            sb.AppendLine("</xs:schema>");
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Recursively builds XSD elements
+        /// </summary>
+        private static void BuildXsdElement(XmlNode node, StringBuilder sb, int indent, bool isRoot)
+        {
+            var indentStr = new string(' ', indent * 2);
+            var occurrenceAttrs = BuildXsdOccurrenceAttributes(node, isRoot);
+
+            if (node.IsLeaf)
+            {
+                var type = node.FieldType == "Image" ? "xs:base64Binary" : "xs:string";
+                sb.AppendLine($"{indentStr}<xs:element name=\"{node.Name}\" type=\"{type}\"{occurrenceAttrs} />");
+                return;
+            }
+
+            if (node.Children.Count == 0)
+            {
+                sb.AppendLine($"{indentStr}<xs:element name=\"{node.Name}\" type=\"xs:string\"{occurrenceAttrs} />");
+                return;
+            }
+
+            sb.AppendLine($"{indentStr}<xs:element name=\"{node.Name}\"{occurrenceAttrs}>");
+            sb.AppendLine($"{indentStr}  <xs:complexType>");
+            sb.AppendLine($"{indentStr}    <xs:sequence>");
+            foreach (var child in node.Children.Values.OrderBy(n => n.Name))
+            {
+                BuildXsdElement(child, sb, indent + 3, false);
+            }
+            sb.AppendLine($"{indentStr}    </xs:sequence>");
+            sb.AppendLine($"{indentStr}  </xs:complexType>");
+            sb.AppendLine($"{indentStr}</xs:element>");
+        }
+
+        /// <summary>
+        /// Returns occurrence attributes for optional/repeating nodes
+        /// </summary>
+        private static string BuildXsdOccurrenceAttributes(XmlNode node, bool isRoot)
+        {
+            var attrs = new StringBuilder();
+            if (!isRoot && node.IsOptional)
+            {
+                attrs.Append(" minOccurs=\"0\"");
+            }
+
+            if (node.IsRepeating)
+            {
+                attrs.Append(" maxOccurs=\"unbounded\"");
+            }
+
+            return attrs.ToString();
         }
 
         /// <summary>
@@ -568,7 +678,7 @@ namespace DocumentAssembler.Core
             public Dictionary<string, XmlNode> Children { get; set; } = new Dictionary<string, XmlNode>(StringComparer.OrdinalIgnoreCase);
             public bool IsLeaf { get; set; }
             public bool IsRepeating { get; set; }
-            public bool IsOptional { get; set; } = true;
+            public bool IsOptional { get; set; }
             public string FieldType { get; set; } = string.Empty;
         }
     }
