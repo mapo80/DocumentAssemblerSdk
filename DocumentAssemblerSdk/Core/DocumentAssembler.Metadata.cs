@@ -21,6 +21,7 @@ namespace DocumentAssembler.Core
             "Repeat",
             "EndRepeat",
             "Conditional",
+            "Else",
             "EndConditional",
         };
 
@@ -301,6 +302,15 @@ namespace DocumentAssembler.Core
                                       <xs:attribute name='NotMatch' type='xs:string' use='optional' />
                                     </xs:complexType>
                                   </xs:element>
+                                </xs:schema>",
+                        }
+                    },
+                    {
+                        PA.Else,
+                        new PASchemaSet() {
+                            XsdMarkup =
+                              @"<xs:schema attributeFormDefault='unqualified' elementFormDefault='qualified' xmlns:xs='http://www.w3.org/2001/XMLSchema'>
+                                  <xs:element name='Else' />
                                 </xs:schema>",
                         }
                     },

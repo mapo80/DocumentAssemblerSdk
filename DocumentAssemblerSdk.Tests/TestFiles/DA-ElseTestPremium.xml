@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Customer>
+  <Name>Alice Johnson</Name>
+  <MembershipType>Premium</MembershipType>
+  <Country>USA</Country>
+  <HighValueCustomer>True</HighValueCustomer>
+  <Points>5000</Points>
+</Customer>

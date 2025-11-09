@@ -241,7 +241,8 @@ namespace DocumentAssembler.Core
                     d.Name == PA.Repeat ||
                     d.Name == PA.Conditional ||
                     d.Name == PA.EndRepeat ||
-                    d.Name == PA.EndConditional))
+                    d.Name == PA.EndConditional ||
+                    d.Name == PA.Else))
             {
                 if (metadata.Name == PA.Repeat)
                 {
@@ -258,6 +259,12 @@ namespace DocumentAssembler.Core
                 if (metadata.Name == PA.Conditional)
                 {
                     ++conditionalDepth;
+                    metadata.Add(new XAttribute(PA.Depth, conditionalDepth));
+                    continue;
+                }
+                if (metadata.Name == PA.Else)
+                {
+                    // Else is at the same depth as its containing Conditional
                     metadata.Add(new XAttribute(PA.Depth, conditionalDepth));
                     continue;
                 }
@@ -312,7 +319,46 @@ namespace DocumentAssembler.Core
                     }
 
                     contentBetween = contentBetween.Where(n => n.Name != W.bookmarkStart && n.Name != W.bookmarkEnd).ToList();
-                    metadata.Add(contentBetween);
+
+                    // Handle Else within Conditional blocks
+                    if (metadata.Name == PA.Conditional)
+                    {
+                        // Find the Else element at the same depth level as this Conditional
+                        var elseElement = contentBetween.FirstOrDefault(e => {
+                            if (e.Name != PA.Else) return false;
+                            var elseDepthAttr = e.Attribute(PA.Depth);
+                            return elseDepthAttr != null && (int)elseDepthAttr == depth;
+                        });
+                        if (elseElement != null)
+                        {
+                            var indexOfElse = contentBetween.IndexOf(elseElement);
+                            var beforeElse = contentBetween.Take(indexOfElse).ToList();
+                            var afterElse = contentBetween.Skip(indexOfElse + 1).ToList();
+
+                            // Add content before Else directly to Conditional
+                            metadata.Add(beforeElse);
+
+                            // Update Else element to contain content after it
+                            elseElement.RemoveNodes();
+                            elseElement.Add(afterElse);
+
+                            // Remove Depth attribute from Else
+                            elseElement.Attributes(PA.Depth).Remove();
+
+                            // Add Else as a child of Conditional
+                            metadata.Add(elseElement);
+                        }
+                        else
+                        {
+                            // No Else, just add all content to Conditional
+                            metadata.Add(contentBetween);
+                        }
+                    }
+                    else
+                    {
+                        metadata.Add(contentBetween);
+                    }
+
                     metadata.Attributes(PA.Depth).Remove();
                     matchingEnd.Remove();
                     didReplace = true;
@@ -611,12 +657,29 @@ namespace DocumentAssembler.Core
                         return CreateContextErrorMessage(element, e.Message, templateError);
                     }
 
-                    if ((match != null && testValue == match) || (notMatch != null && testValue != notMatch))
+                    var conditionIsTrue = (match != null && testValue == match) || (notMatch != null && testValue != notMatch);
+
+                    // Find Else element if present
+                    var elseElement = element.Elements(PA.Else).FirstOrDefault();
+
+                    if (conditionIsTrue)
                     {
-                        var content = element.Elements().Select(e => ContentReplacementTransform(e, data, templateError, owningPart));
+                        // Process all child elements except Else
+                        var content = element.Elements().Where(e => e.Name != PA.Else).Select(e => ContentReplacementTransform(e, data, templateError, owningPart));
                         return content;
                     }
-                    return null;
+                    else
+                    {
+                        // Condition is false
+                        if (elseElement != null)
+                        {
+                            // Process content inside Else
+                            var elseContent = elseElement.Elements().Select(e => ContentReplacementTransform(e, data, templateError, owningPart));
+                            return elseContent;
+                        }
+                        // No Else, return null
+                        return null;
+                    }
                 }
                 return new XElement(element.Name,
                     element.Attributes(),
@@ -722,6 +785,7 @@ namespace DocumentAssembler.Core
             public static readonly XName Repeat = "Repeat";
             public static readonly XName EndRepeat = "EndRepeat";
             public static readonly XName Conditional = "Conditional";
+            public static readonly XName Else = "Else";
             public static readonly XName EndConditional = "EndConditional";
             public static readonly XName Select = "Select";
             public static readonly XName Optional = "Optional";

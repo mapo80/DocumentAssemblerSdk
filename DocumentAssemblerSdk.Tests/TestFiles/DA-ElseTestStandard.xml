@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Customer>
+  <Name>Bob Smith</Name>
+  <MembershipType>Standard</MembershipType>
+  <Country>Canada</Country>
+  <HighValueCustomer>False</HighValueCustomer>
+  <Points>1000</Points>
+</Customer>

@@ -107,6 +107,12 @@ namespace DocumentAssembler.Tests
         [InlineData("DA264-InvalidRunLevelRepeat.docx", "DA-Data.xml", true)]
         [InlineData("DA265-RunLevelRepeatWithWhiteSpaceBefore.docx", "DA-Data.xml", false)]
         [InlineData("DA266-RunLevelRepeat-NoData.docx", "DA-Data.xml", true)]
+        [InlineData("DA270-ConditionalWithElse.docx", "DA-ElseTestPremium.xml", false)]
+        [InlineData("DA270-ConditionalWithElse.docx", "DA-ElseTestStandard.xml", false)]
+        [InlineData("DA271-ConditionalWithElseNotMatch.docx", "DA-ElseTestPremium.xml", false)]
+        [InlineData("DA271-ConditionalWithElseNotMatch.docx", "DA-ElseTestStandard.xml", false)]
+        [InlineData("DA272-NestedConditionalWithElse.docx", "DA-ElseTestPremium.xml", false)]
+        [InlineData("DA272-NestedConditionalWithElse.docx", "DA-ElseTestStandard.xml", false)]
         public void DA101(string name, string data, bool err)
         {
             var sourceDir = new DirectoryInfo("TestFiles/");

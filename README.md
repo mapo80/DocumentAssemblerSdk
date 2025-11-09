@@ -13,8 +13,9 @@ This SDK was **extracted from [OpenXmlPowerTools](https://github.com/EricWhiteDe
 - **Cleaned up** 228 lines of dead code (unused classes, methods, and constructors)
 - **Fixed** all nullable warnings for improved type safety
 - **Split** large files into maintainable partial classes for better code organization
-- **Maintained** 100% test coverage (107/107 tests passing)
+- **Maintained** 100% test coverage (117/117 tests passing)
 - **Enhanced** with comprehensive image placeholder support (sizing, alignment, aspect ratio preservation)
+- **Added** Else tag for if-else logic in Conditional blocks with full nested support
 
 ## Project Objective
 
@@ -30,13 +31,14 @@ The DocumentAssembler SDK enables **template-based document generation** by merg
 
 ## Supported Template Tags
 
-The SDK supports six types of template tags, all using the format `<#TagName ... #>`:
+The SDK supports seven types of template tags, all using the format `<#TagName ... #>`:
 
 | Tag | Purpose | When to Use |
 |-----|---------|-------------|
 | **Content** | Insert a single value from XML data | Display simple data fields (names, emails, dates, etc.) |
 | **Table** | Generate dynamic table rows from a collection | Create tables with variable number of rows (order items, invoices, etc.) |
 | **Conditional** | Include/exclude content based on conditions | Show different content based on data values (membership status, country-specific text) |
+| **Else** | Provide alternative content when condition is false | Create if-else logic within Conditional blocks (show premium vs standard content) |
 | **Repeat** | Repeat content blocks for each item in a collection | Generate multiple paragraphs or sections (department summaries, product listings) |
 | **Image** | Insert images from base64-encoded data | Display dynamic images with size and alignment control (product photos, signatures) |
 | **Optional** | Mark placeholders as optional to avoid errors | Handle potentially missing data gracefully (middle names, optional fields) |
@@ -110,6 +112,7 @@ Include or exclude content based on whether an XML value matches a specific cond
 **Syntax**:
 - `<#Conditional Select="XPath" Match="Value"#>...<#EndConditional#>` (include if matches)
 - `<#Conditional Select="XPath" NotMatch="Value"#>...<#EndConditional#>` (include if doesn't match)
+- `<#Conditional Select="XPath" Match="Value"#>...<#Else#>...<#EndConditional#>` (if-else structure)
 
 **Example**:
 ```xml
@@ -137,6 +140,189 @@ International shipping rates apply.
 <!-- Output (for the above data) -->
 Shipping: Free domestic shipping within the USA.
 As a premium member, you receive 20% off all purchases.
+```
+
+#### Conditional with Else (If-Else Logic)
+
+The `<#Else#>` tag provides an **alternative content block** when the condition is false. This is **optional** and must be placed between a `<#Conditional#>` and its matching `<#EndConditional#>`.
+
+**Syntax**:
+```
+<#Conditional Select="XPath" Match="Value"#>
+  Content shown when condition is TRUE
+<#Else#>
+  Content shown when condition is FALSE
+<#EndConditional#>
+```
+
+**Key Points**:
+- `<#Else#>` is **optional** - you can use Conditional without it
+- `<#Else#>` must be inside a Conditional block (between Conditional and EndConditional)
+- You can nest Conditionals with Else inside other Conditionals
+- Works with both `Match` and `NotMatch` attributes
+- Supports both **string** and **numeric** value matching
+
+---
+
+**Example 1: Basic If-Else with String Matching**
+
+```xml
+<!-- XML Data -->
+<Customer>
+  <MembershipType>Premium</MembershipType>
+</Customer>
+```
+
+```
+<!-- Template -->
+<#Conditional Select="Customer/MembershipType" Match="Premium"#>
+✓ You are a PREMIUM member! Benefits:
+  • 20% discount on all purchases
+  • Free shipping worldwide
+  • Priority customer support
+<#Else#>
+You are a Standard member. Benefits:
+  • 5% discount on purchases
+  • Standard shipping rates apply
+<#EndConditional#>
+
+Thank you for being our customer!
+```
+
+```
+<!-- Output (when MembershipType = "Premium") -->
+✓ You are a PREMIUM member! Benefits:
+  • 20% discount on all purchases
+  • Free shipping worldwide
+  • Priority customer support
+
+Thank you for being our customer!
+
+<!-- Output (when MembershipType = "Standard" or any other value) -->
+You are a Standard member. Benefits:
+  • 5% discount on purchases
+  • Standard shipping rates apply
+
+Thank you for being our customer!
+```
+
+---
+
+**Example 2: If-Else with NotMatch**
+
+```xml
+<!-- XML Data -->
+<Customer>
+  <Country>Canada</Country>
+</Customer>
+```
+
+```
+<!-- Template -->
+<#Conditional Select="Customer/Country" NotMatch="USA"#>
+📦 International shipping:
+  • Shipping costs apply based on location
+  • Estimated delivery: 10-15 business days
+  • Customs fees may apply
+<#Else#>
+📦 Domestic USA shipping:
+  • FREE shipping on all orders!
+  • Estimated delivery: 2-3 business days
+<#EndConditional#>
+```
+
+```
+<!-- Output (when Country = "Canada", "UK", etc. - anything except "USA") -->
+📦 International shipping:
+  • Shipping costs apply based on location
+  • Estimated delivery: 10-15 business days
+  • Customs fees may apply
+
+<!-- Output (when Country = "USA") -->
+📦 Domestic USA shipping:
+  • FREE shipping on all orders!
+  • Estimated delivery: 2-3 business days
+```
+
+---
+
+**Example 3: Nested Conditionals with Else (Advanced)**
+
+You can nest Conditional blocks with Else inside other Conditionals for complex logic.
+
+```xml
+<!-- XML Data -->
+<Customer>
+  <MembershipType>Premium</MembershipType>
+  <Points>5000</Points>
+</Customer>
+```
+
+```
+<!-- Template -->
+<#Conditional Select="Customer/MembershipType" Match="Premium"#>
+🌟 Premium Member Benefits:
+
+  <#Conditional Select="Customer/Points" Match="5000"#>
+  ⭐ PLATINUM TIER - You've reached 5000 points!
+    • Exclusive access to VIP lounge
+    • Personal account manager
+    • 25% discount on all purchases
+  <#Else#>
+  You have Premium status
+    • 20% discount on purchases
+    • Priority support
+  <#EndConditional#>
+
+<#Else#>
+Standard Member Benefits:
+  • 5% discount on purchases
+  • Email support available
+<#EndConditional#>
+```
+
+```
+<!-- Output (when MembershipType = "Premium" AND Points = 5000) -->
+🌟 Premium Member Benefits:
+
+  ⭐ PLATINUM TIER - You've reached 5000 points!
+    • Exclusive access to VIP lounge
+    • Personal account manager
+    • 25% discount on all purchases
+
+<!-- Output (when MembershipType = "Premium" AND Points ≠ 5000) -->
+🌟 Premium Member Benefits:
+
+  You have Premium status
+    • 20% discount on purchases
+    • Priority support
+
+<!-- Output (when MembershipType ≠ "Premium") -->
+Standard Member Benefits:
+  • 5% discount on purchases
+  • Email support available
+```
+
+---
+
+**Example 4: Numeric Value Matching**
+
+The Conditional tag works with numeric values as well as strings.
+
+```xml
+<!-- XML Data -->
+<Order>
+  <TotalAmount>150</TotalAmount>
+</Order>
+```
+
+```
+<!-- Template -->
+<#Conditional Select="Order/TotalAmount" Match="150"#>
+🎉 Your order qualifies for a special bonus!
+<#Else#>
+Add more items to unlock bonus rewards.
+<#EndConditional#>
 ```
 
 ### 4. Repeat (Repeating Content Blocks)
@@ -293,9 +479,35 @@ DocumentAssembler/
 # Build the library
 dotnet build DocumentAssemblerSdk/DocumentAssemblerSdk.csproj
 
-# Run tests (107/107 passing)
+# Run tests (117/117 passing)
 dotnet test DocumentAssemblerSdk.Tests/DocumentAssemblerSdk.Tests.csproj
 ```
+
+## Generating Test Documents
+
+For developers who need to create test .docx files with content controls, we provide a Python script:
+
+```bash
+# Generate all test documents
+python3 generate_test_docx.py
+
+# Generate to a specific directory
+python3 generate_test_docx.py /path/to/output/dir
+
+# View help
+python3 generate_test_docx.py --help
+```
+
+**What it generates**:
+- `DA270-ConditionalWithElse.docx` - Basic Conditional with Else using Match
+- `DA271-ConditionalWithElseNotMatch.docx` - Conditional with Else using NotMatch
+- `DA272-NestedConditionalWithElse.docx` - Nested Conditionals with Else
+
+**Requirements**:
+- Python 3.x (no external dependencies needed)
+- Source template: `DocumentAssemblerSdk.Examples/Example01_Basic/TemplateDocument.docx`
+
+The script creates valid .docx files by copying the template structure and injecting custom document.xml with proper content controls. This is useful for creating test files without manually editing Word documents.
 
 ## Dependencies
 
