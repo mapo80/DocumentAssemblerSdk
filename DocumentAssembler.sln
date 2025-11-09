@@ -23,6 +23,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Example06_SchemaExtraction"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Example07_ComplexSchemaExtraction", "DocumentAssemblerSdk.Examples\Example07_ComplexSchemaExtraction\Example07_ComplexSchemaExtraction.csproj", "{8556B179-12B4-49C5-9A2D-247C56E53422}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PerfMeasurementTool", "PerfMeasurementTool\PerfMeasurementTool.csproj", "{F69D4BC4-4B15-4D42-92B5-ACE297E7B27B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -68,6 +70,10 @@ Global
 		{8556B179-12B4-49C5-9A2D-247C56E53422}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{8556B179-12B4-49C5-9A2D-247C56E53422}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{8556B179-12B4-49C5-9A2D-247C56E53422}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F69D4BC4-4B15-4D42-92B5-ACE297E7B27B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F69D4BC4-4B15-4D42-92B5-ACE297E7B27B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F69D4BC4-4B15-4D42-92B5-ACE297E7B27B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F69D4BC4-4B15-4D42-92B5-ACE297E7B27B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{493A1309-A648-4DC7-9493-20F26AD039C2} = {5740778B-CE1D-4761-A24E-08F57FC2E2B7}

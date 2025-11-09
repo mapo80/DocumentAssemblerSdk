@@ -3,10 +3,12 @@ using DocumentFormat.OpenXml.Wordprocessing;
 using SkiaSharp;
 using System;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
@@ -40,11 +42,12 @@ namespace DocumentAssembler.Core
                 }
 
                 var te = new TemplateError();
+                var evaluationContext = new XPathEvaluationContext();
                 foreach (var part in wordDoc.ContentParts())
                 {
                     if (part != null)
                     {
-                        ProcessTemplatePart(data, te, part);
+                        ProcessTemplatePart(data, te, part, evaluationContext);
                     }
                 }
                 templateError = te.HasError;
@@ -53,7 +56,7 @@ namespace DocumentAssembler.Core
             return assembledDocument;
         }
 
-        private static void ProcessTemplatePart(XElement data, TemplateError te, OpenXmlPart part)
+        private static void ProcessTemplatePart(XElement data, TemplateError te, OpenXmlPart part, XPathEvaluationContext evaluationContext)
         {
             var xDoc = part.GetXDocument();
             if (xDoc.Root == null)
@@ -76,11 +79,8 @@ namespace DocumentAssembler.Core
 
             NormalizeTablesRepeatAndConditional(xDocRoot, te);
 
-            // any EndRepeat, EndConditional that remain are orphans, so replace with an error
-            ProcessOrphanEndRepeatEndConditional(xDocRoot, te);
-
             // do the actual content replacement
-            xDocRoot = ContentReplacementTransform(xDocRoot, data, te, part) as XElement;
+            xDocRoot = ContentReplacementTransform(xDocRoot, data, te, part, evaluationContext) as XElement;
 
             // Note: Error collection is done during processing. Errors are indicated by:
             // 1. The templateError boolean flag (te.HasError)
@@ -156,20 +156,6 @@ namespace DocumentAssembler.Core
                     element.Nodes().Select(n => ForceBlockLevelAsAppropriate(n, te)));
             }
             return node;
-        }
-
-        private static void ProcessOrphanEndRepeatEndConditional(XElement xDocRoot, TemplateError te)
-        {
-            foreach (var element in xDocRoot.Descendants(PA.EndRepeat).ToList())
-            {
-                var error = CreateContextErrorMessage(element, "Error: EndRepeat without matching Repeat", te);
-                element.ReplaceWith(error);
-            }
-            foreach (var element in xDocRoot.Descendants(PA.EndConditional).ToList())
-            {
-                var error = CreateContextErrorMessage(element, "Error: EndConditional without matching Conditional", te);
-                element.ReplaceWith(error);
-            }
         }
 
         private static XElement RemoveGoBackBookmarks(XElement xElement)
@@ -377,9 +363,20 @@ namespace DocumentAssembler.Core
                     break;
                 }
             }
+
+            foreach (var element in xDoc.Descendants(PA.EndRepeat).ToList())
+            {
+                var error = CreateContextErrorMessage(element, "Error: EndRepeat without matching Repeat", te);
+                element.ReplaceWith(error);
+            }
+            foreach (var element in xDoc.Descendants(PA.EndConditional).ToList())
+            {
+                var error = CreateContextErrorMessage(element, "Error: EndConditional without matching Conditional", te);
+                element.ReplaceWith(error);
+            }
         }
 
-        private static object? ContentReplacementTransform(XNode node, XElement data, TemplateError templateError, OpenXmlPart owningPart)
+        private static object? ContentReplacementTransform(XNode node, XElement data, TemplateError templateError, OpenXmlPart owningPart, XPathEvaluationContext evaluationContext)
         {
             if (node is XElement element)
             {
@@ -399,17 +396,32 @@ namespace DocumentAssembler.Core
                     var optional = optionalString == null || !bool.TryParse(optionalString, out var optionalValue) || optionalValue;
 
                     // EvaluateXPathToString now collects errors instead of throwing
-                    string newValue = EvaluateXPathToString(data, xPath, optional, templateError);
+                    string newValue = EvaluateXPathToString(data, xPath, optional, templateError, evaluationContext);
 
                     if (para != null)
                     {
-                        var p = new XElement(W.p, para.Elements(W.pPr));
+                        var template = GetParagraphTemplate(para, run ?? para.Elements(W.r).FirstOrDefault());
+                        var p = new XElement(W.p,
+                            template.ParagraphProperties != null ? new XElement(template.ParagraphProperties) : null);
+                        var firstLine = true;
                         foreach (var line in newValue.Split('\n'))
                         {
-                            p.Add(new XElement(W.r,
-                                    para.Elements(W.r).Elements(W.rPr).FirstOrDefault(),
-                                (p.Elements().Count() > 1) ? new XElement(W.br) : null,
-                                new XElement(W.t, line)));
+                            var lineRun = new XElement(template.RunPrototype);
+                            var textNode = lineRun.Element(W.t);
+                            if (textNode != null)
+                            {
+                                textNode.Value = line;
+                            }
+                            else
+                            {
+                                lineRun.Add(new XElement(W.t, line));
+                            }
+                            if (!firstLine)
+                            {
+                                lineRun.AddFirst(new XElement(W.br));
+                            }
+                            p.Add(lineRun);
+                            firstLine = false;
                         }
                         return p;
                     }
@@ -448,7 +460,7 @@ namespace DocumentAssembler.Core
                     var maxHeightAttr = (string?)element.Attribute(PA.MaxHeight);
 
                     // EvaluateXPathToString now collects errors instead of throwing
-                    string base64Content = EvaluateXPathToString(data, xPath, optional, templateError);
+                    string base64Content = EvaluateXPathToString(data, xPath, optional, templateError, evaluationContext);
 
                     if (string.IsNullOrEmpty(base64Content))
                     {
@@ -506,7 +518,7 @@ namespace DocumentAssembler.Core
                     IEnumerable<XElement> repeatingData;
                     try
                     {
-                        repeatingData = data.XPathSelectElements(selector);
+                        repeatingData = EvaluateXPathElements(data, selector, evaluationContext).ToList();
                     }
                     catch (XPathException e)
                     {
@@ -520,11 +532,11 @@ namespace DocumentAssembler.Core
                         }
                         return CreateContextErrorMessage(element, "Repeat: Select returned no data", templateError);
                     }
+                    var repeatChildren = element.Elements().ToList();
                     var newContent = repeatingData.Select(d =>
                         {
-                            var content = element
-                                .Elements()
-                                .Select(e => ContentReplacementTransform(e, d, templateError, owningPart))
+                            var content = repeatChildren
+                                .Select(e => ContentReplacementTransform(e, d, templateError, owningPart, evaluationContext))
                                 .ToList();
                             return content;
                         })
@@ -542,7 +554,7 @@ namespace DocumentAssembler.Core
                     IEnumerable<XElement> tableData;
                     try
                     {
-                        tableData = data.XPathSelectElements(selectAttr);
+                        tableData = EvaluateXPathElements(data, selectAttr, evaluationContext).ToList();
                     }
                     catch (XPathException e)
                     {
@@ -565,7 +577,7 @@ namespace DocumentAssembler.Core
                         .Skip(2)
                         .ToList();
                     var footerRows = footerRowsBeforeTransform
-                        .Select(x => ContentReplacementTransform(x, data, templateError, owningPart))
+                        .Select(x => ContentReplacementTransform(x, data, templateError, owningPart, evaluationContext))
                         .ToList();
                     if (protoRow == null)
                     {
@@ -574,40 +586,19 @@ namespace DocumentAssembler.Core
 
                     protoRow.Descendants(W.bookmarkStart).Remove();
                     protoRow.Descendants(W.bookmarkEnd).Remove();
+                    var tablePrefixNodes = table.Elements().Where(e => e.Name != W.tr).ToList();
+                    var cellTemplates = protoRow.Elements(W.tc)
+                        .Select(tc => CreateTableCellTemplate(tc, templateError))
+                        .ToList();
                     var newTable = new XElement(W.tbl,
-                        table.Elements().Where(e => e.Name != W.tr),
+                        tablePrefixNodes,
                         table.Elements(W.tr).FirstOrDefault(),
                         tableData.Select(d =>
                             new XElement(W.tr,
                                 protoRow.Elements().Where(r => r.Name != W.tc),
-                                protoRow.Elements(W.tc)
-                                    .Select(tc =>
-                                    {
-                                        var paragraph = tc.Elements(W.p).FirstOrDefault();
-                                        if (paragraph == null)
-                                        {
-                                            return new XElement(W.tc,
-                                                tc.Elements().Where(z => z.Name != W.p),
-                                                new XElement(W.p,
-                                                    CreateRunErrorMessage("Table cell does not contain a paragraph", templateError)));
-                                        }
-
-                                        var cellRun = paragraph.Elements(W.r).FirstOrDefault();
-                                        var xPath = paragraph.Value;
-                                        // EvaluateXPathToString now collects errors instead of throwing
-                                        string? newValue = EvaluateXPathToString(d, xPath, false, templateError);
-
-                                        var newCell = new XElement(W.tc,
-                                                   tc.Elements().Where(z => z.Name != W.p),
-                                                   new XElement(W.p,
-                                                       paragraph.Element(W.pPr),
-                                                       new XElement(W.r,
-                                                           cellRun != null ? cellRun.Element(W.rPr) : new XElement(W.rPr),  //if the cell was empty there is no cellrun
-                                                           new XElement(W.t, newValue))));
-                                        return newCell;
-                                    }))),
-                                    footerRows
-                                    );
+                                cellTemplates.Select(ct => BuildTableCell(ct, d, templateError, evaluationContext)))),
+                        footerRows
+                    );
                     return newTable;
                 }
                 if (element.Name == PA.Conditional)
@@ -632,7 +623,7 @@ namespace DocumentAssembler.Core
                     }
 
                     // EvaluateXPathToString now collects errors instead of throwing
-                    string? testValue = EvaluateXPathToString(data, xPath, false, templateError);
+                    string? testValue = EvaluateXPathToString(data, xPath, false, templateError, evaluationContext);
 
                     var conditionIsTrue = (match != null && testValue == match) || (notMatch != null && testValue != notMatch);
 
@@ -642,7 +633,7 @@ namespace DocumentAssembler.Core
                     if (conditionIsTrue)
                     {
                         // Process all child elements except Else
-                        var content = element.Elements().Where(e => e.Name != PA.Else).Select(e => ContentReplacementTransform(e, data, templateError, owningPart));
+                        var content = element.Elements().Where(e => e.Name != PA.Else).Select(e => ContentReplacementTransform(e, data, templateError, owningPart, evaluationContext));
                         return content;
                     }
                     else
@@ -651,7 +642,7 @@ namespace DocumentAssembler.Core
                         if (elseElement != null)
                         {
                             // Process content inside Else
-                            var elseContent = elseElement.Elements().Select(e => ContentReplacementTransform(e, data, templateError, owningPart));
+                            var elseContent = elseElement.Elements().Select(e => ContentReplacementTransform(e, data, templateError, owningPart, evaluationContext));
                             return elseContent;
                         }
                         // No Else, return null
@@ -660,7 +651,7 @@ namespace DocumentAssembler.Core
                 }
                 return new XElement(element.Name,
                     element.Attributes(),
-                    element.Nodes().Select(n => ContentReplacementTransform(n, data, templateError, owningPart)));
+                    element.Nodes().Select(n => ContentReplacementTransform(n, data, templateError, owningPart, evaluationContext)));
             }
             return node;
         }
@@ -702,63 +693,241 @@ namespace DocumentAssembler.Core
             return errorPara;
         }
 
-        private static string EvaluateXPathToString(XElement element, string xPath, bool optional, TemplateError templateError)
+        private static readonly ConcurrentDictionary<string, XPathExpression> s_XPathExpressionCache = new();
+        private static readonly ConditionalWeakTable<XElement, ParagraphRunTemplate> s_ParagraphTemplateCache = new();
+
+        private readonly struct EvaluationCacheKey : IEquatable<EvaluationCacheKey>
         {
+            public XElement Data { get; }
+            public string XPath { get; }
+            public bool Optional { get; }
+
+            public EvaluationCacheKey(XElement data, string xPath, bool optional)
+            {
+                Data = data;
+                XPath = xPath;
+                Optional = optional;
+            }
+
+            public bool Equals(EvaluationCacheKey other) =>
+                ReferenceEquals(Data, other.Data) &&
+                StringComparer.Ordinal.Equals(XPath, other.XPath) &&
+                Optional == other.Optional;
+
+            public override bool Equals(object? obj) => obj is EvaluationCacheKey other && Equals(other);
+
+            public override int GetHashCode() =>
+                HashCode.Combine(RuntimeHelpers.GetHashCode(Data), StringComparer.Ordinal.GetHashCode(XPath), Optional);
+        }
+
+        private sealed class XPathEvaluationContext
+        {
+            private readonly Dictionary<EvaluationCacheKey, string> _cache = new();
+            private readonly Dictionary<(XElement Data, string XPath), XElement[]> _elementCache = new();
+
+            public bool TryGet(EvaluationCacheKey key, out string value) => _cache.TryGetValue(key, out value);
+
+            public void Store(EvaluationCacheKey key, string value) => _cache[key] = value;
+
+            public bool TryGetElements(XElement data, string xpath, out XElement[] elements) =>
+                _elementCache.TryGetValue((data, xpath), out elements);
+
+            public void StoreElements(XElement data, string xpath, XElement[] elements) =>
+                _elementCache[(data, xpath)] = elements;
+        }
+
+        private sealed class ParagraphRunTemplate
+        {
+            public XElement? ParagraphProperties { get; }
+            public XElement RunPrototype { get; }
+
+            public ParagraphRunTemplate(XElement? paragraphProperties, XElement runPrototype)
+            {
+                ParagraphProperties = paragraphProperties;
+                RunPrototype = runPrototype;
+            }
+        }
+
+        private static ParagraphRunTemplate GetParagraphTemplate(XElement paragraph, XElement? run)
+        {
+            return s_ParagraphTemplateCache.GetValue(paragraph, key =>
+            {
+                var paragraphProps = key.Element(W.pPr);
+                var runPrototype = new XElement(W.r);
+                var runProps = run?.Element(W.rPr);
+                if (runProps != null)
+                {
+                    runPrototype.Add(new XElement(runProps));
+                }
+                else
+                {
+                    runPrototype.Add(new XElement(W.rPr));
+                }
+                runPrototype.Add(new XElement(W.t));
+                return new ParagraphRunTemplate(paragraphProps, runPrototype);
+            });
+        }
+
+        private static string EvaluateXPathToString(XElement element, string xPath, bool optional, TemplateError templateError, XPathEvaluationContext evaluationContext)
+        {
+            var cacheKey = new EvaluationCacheKey(element, xPath, optional);
+            if (evaluationContext.TryGet(cacheKey, out var cachedValue))
+            {
+                return cachedValue;
+            }
+
+            if (string.IsNullOrWhiteSpace(xPath))
+            {
+                evaluationContext.Store(cacheKey, string.Empty);
+                return string.Empty;
+            }
+
             object xPathSelectResult;
             try
             {
-                //support some cells in the table may not have an xpath expression.
-                if (string.IsNullOrWhiteSpace(xPath))
-                {
-                    return string.Empty;
-                }
-
-                xPathSelectResult = element.XPathEvaluate(xPath);
+                var navigator = element.CreateNavigator();
+                var baseExpression = s_XPathExpressionCache.GetOrAdd(xPath, key => XPathExpression.Compile(key));
+                var expression = baseExpression.Clone();
+                expression.SetContext(navigator);
+                xPathSelectResult = navigator.Evaluate(expression);
             }
             catch (XPathException e)
             {
                 // Collect XPath syntax errors instead of throwing
                 var errorMsg = "XPathException: " + e.Message;
                 templateError.AddError(errorMsg);
-                return "[ERROR: Invalid XPath]";
+                var invalidResult = "[ERROR: Invalid XPath]";
+                evaluationContext.Store(cacheKey, invalidResult);
+                return invalidResult;
             }
 
+            string result;
             if ((xPathSelectResult is IEnumerable) && !(xPathSelectResult is string))
             {
-                var selectedData = ((IEnumerable)xPathSelectResult).Cast<XObject>();
+                var selectedData = ((IEnumerable)xPathSelectResult).Cast<object>().ToList();
                 if (!selectedData.Any())
                 {
                     if (optional)
                     {
-                        return string.Empty;
+                        result = string.Empty;
                     }
-
-                    // Collect missing field error instead of throwing
-                    templateError.AddMissingField(xPath);
-                    return "[ERROR: Missing field]";
+                    else
+                    {
+                        // Collect missing field error instead of throwing
+                        templateError.AddMissingField(xPath);
+                        result = "[ERROR: Missing field]";
+                    }
+                    evaluationContext.Store(cacheKey, result);
+                    return result;
                 }
-                if (selectedData.Count() > 1)
+                if (selectedData.Count > 1)
                 {
                     // Collect multiple results error instead of throwing
                     var errorMsg = string.Format("XPath expression ({0}) returned more than one node", xPath);
                     templateError.AddError(errorMsg);
-                    return "[ERROR: Multiple results]";
+                    result = "[ERROR: Multiple results]";
+                    evaluationContext.Store(cacheKey, result);
+                    return result;
                 }
 
                 var selectedDatum = selectedData.First();
-
                 if (selectedDatum is XElement element1)
                 {
-                    return element1.Value;
+                    result = element1.Value;
+                    evaluationContext.Store(cacheKey, result);
+                    return result;
                 }
 
-                if (selectedDatum is XAttribute)
+                if (selectedDatum is XAttribute attribute)
                 {
-                    return ((XAttribute)selectedDatum).Value;
+                    result = attribute.Value;
+                    evaluationContext.Store(cacheKey, result);
+                    return result;
+                }
+
+                if (selectedDatum is XPathNavigator navigator)
+                {
+                    result = navigator.Value;
+                    evaluationContext.Store(cacheKey, result);
+                    return result;
                 }
             }
 
-            return xPathSelectResult.ToString() ?? string.Empty;
+            result = xPathSelectResult.ToString() ?? string.Empty;
+            evaluationContext.Store(cacheKey, result);
+            return result;
+        }
+
+        private static XElement[] EvaluateXPathElements(XElement element, string xPath, XPathEvaluationContext evaluationContext)
+        {
+            if (evaluationContext.TryGetElements(element, xPath, out var cached))
+            {
+                return cached;
+            }
+
+            var navigator = element.CreateNavigator();
+            var baseExpression = s_XPathExpressionCache.GetOrAdd(xPath, key => XPathExpression.Compile(key));
+            var expression = baseExpression.Clone();
+            expression.SetContext(navigator);
+            var iterator = navigator.Select(expression);
+            var buffer = new List<XElement>();
+            while (iterator.MoveNext())
+            {
+                var current = iterator.Current;
+                if (current?.UnderlyingObject is XElement xElement)
+                {
+                    buffer.Add(xElement);
+                }
+            }
+
+            var result = buffer.ToArray();
+            evaluationContext.StoreElements(element, xPath, result);
+            return result;
+        }
+
+        private sealed record TableCellTemplate(
+            XElement[] NonParagraphNodes,
+            XElement? ParagraphProperties,
+            XElement? RunProperties,
+            string XPath,
+            bool HasParagraph);
+
+        private static TableCellTemplate CreateTableCellTemplate(XElement tc, TemplateError templateError)
+        {
+            var paragraph = tc.Elements(W.p).FirstOrDefault();
+            var nonParagraphNodes = tc.Elements().Where(z => z.Name != W.p).Select(node => new XElement(node)).ToArray();
+            if (paragraph == null)
+            {
+                return new TableCellTemplate(nonParagraphNodes, null, null, string.Empty, false);
+            }
+            var paragraphProperties = paragraph.Element(W.pPr);
+            var cellRun = paragraph.Elements(W.r).FirstOrDefault();
+            var runProperties = cellRun?.Element(W.rPr);
+            return new TableCellTemplate(nonParagraphNodes, paragraphProperties, runProperties, paragraph.Value, true);
+        }
+
+        private static XElement BuildTableCell(TableCellTemplate template, XElement data, TemplateError templateError, XPathEvaluationContext evaluationContext)
+        {
+            if (!template.HasParagraph)
+            {
+                return new XElement(W.tc,
+                    template.NonParagraphNodes,
+                    new XElement(W.p,
+                        CreateRunErrorMessage("Table cell does not contain a paragraph", templateError)));
+            }
+
+            var newValue = EvaluateXPathToString(data, template.XPath, false, templateError, evaluationContext);
+            var paragraphProps = template.ParagraphProperties != null ? new XElement(template.ParagraphProperties) : null;
+            var runProps = template.RunProperties != null ? new XElement(template.RunProperties) : new XElement(W.rPr);
+            var run = new XElement(W.r,
+                runProps,
+                new XElement(W.t, newValue));
+            var paragraphElement = new XElement(W.p,
+                paragraphProps,
+                run);
+            return new XElement(W.tc,
+                template.NonParagraphNodes.Select(node => new XElement(node)),
+                paragraphElement);
         }
 
         // Nested classes

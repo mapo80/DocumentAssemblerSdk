@@ -219,7 +219,7 @@ namespace DocumentAssembler.Core
         {
             if (s_PASchemaSets == null)
             {
-                s_PASchemaSets = new Dictionary<XName, PASchemaSet>()
+                var schemaSets = new Dictionary<XName, PASchemaSet>()
                 {
                     {
                         PA.Content,
@@ -324,13 +324,14 @@ namespace DocumentAssembler.Core
                         }
                     },
                 };
-                foreach (var item in s_PASchemaSets)
+                foreach (var item in schemaSets)
                 {
                     var itemPAss = item.Value;
                     var schemas = new XmlSchemaSet();
                     schemas.Add("", XmlReader.Create(new StringReader(itemPAss.XsdMarkup)));
                     itemPAss.SchemaSet = schemas;
                 }
+                s_PASchemaSets = schemaSets;
             }
             if (!s_PASchemaSets.ContainsKey(element.Name))
             {

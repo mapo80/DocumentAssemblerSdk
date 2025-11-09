@@ -671,6 +671,29 @@ if (templateError)
 }
 ```
 
+## Document Generation Performance Baseline
+
+`PerfMeasurementTool` is a CLI that assembles two templates and reports timing statistics in `Release` mode. Each scenario now executes ten runs and discards the first to account for JIT/startup noise. Run the measurement with:
+
+```
+dotnet run --project PerfMeasurementTool --configuration Release
+```
+
+The CLI uses `PerfMeasurementTool/SimpleTemplate.docx` and `PerfMeasurementTool/ComplexTemplate.docx`. Because the templates are intentionally minimal, the tool prints template-warning lines but the reported durations are valid.
+
+### Baseline snapshot (immutable)
+
+| Scenario | Template | Raw timings (ms) | Average (drop first run) |
+| --- | --- | --- | --- |
+| Simple | `PerfMeasurementTool/SimpleTemplate.docx` | 91.0, 2.0, 1.0, 0.9, 0.9, 1.0, 0.9, 1.3, 3.0, 0.9 | 1.3 |
+| Complex | `PerfMeasurementTool/ComplexTemplate.docx` | 1.3, 1.2, 1.2, 1.4, 1.4, 1.8, 1.2, 1.2, 1.2, 1.4 | 1.3 |
+
+> **This section is a permanent performance baseline. Do not edit these figures unless you replace the snapshot as part of a deliberate optimization milestone.**
+
+Compared to the previous six-run baseline (Simple ≈ 1.0 ms, Complex ≈ 2.0 ms), the complex scenario now completes about **35 % faster** (2.0 ms → 1.3 ms on average), while the simple scenario remains within the same order of magnitude once warm-up jitter is discounted.
+
+This snapshot was recorded with the XML-style templates shipped in `PerfMeasurementTool`, so the extractor never emits `XmlException` errors while measuring. Keep the numbers above as the reference for future optimizations.
+
 ## Project Structure
 
 ```
