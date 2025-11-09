@@ -19,7 +19,8 @@ namespace DocumentAssembler.Core
         private static readonly Regex s_TagRegex = new Regex(@"<#\s*(\w+)\s+([^#]+)#>", RegexOptions.Compiled);
 
         // Regex for XML format: <Content Select="..." /> or <Content Select="...">
-        private static readonly Regex s_XmlTagRegex = new Regex(@"<(Content|Image|Table|Repeat|Conditional)\s+([^/>]+)(?:/?>)", RegexOptions.Compiled);
+        // Match tag name, then attributes (everything except > unless in quotes), then optional / before >
+        private static readonly Regex s_XmlTagRegex = new Regex(@"<(Content|Image|Table|Repeat|Conditional)\s+([^>]+?)(\s*/?>)", RegexOptions.Compiled);
 
         private static readonly Regex s_AttributeRegex = new Regex(@"(\w+)\s*=\s*[""']([^""']+)[""']", RegexOptions.Compiled);
 
@@ -183,6 +184,27 @@ namespace DocumentAssembler.Core
                 {
                     ParseAndAddField(text, fields, repeatingPaths);
                 }
+                else if (text.Contains("<Content") || text.Contains("<Image") || text.Contains("<Table") ||
+                         text.Contains("<Repeat") || text.Contains("<Conditional") || text.Contains("<Else") || text.Contains("<EndRepeat") || text.Contains("<EndConditional"))
+                {
+                    // Also try XML format: <Content ... />, <Else>, etc.
+                    var xmlMatches = s_XmlTagRegex.Matches(text);
+                    foreach (Match match in xmlMatches)
+                    {
+                        ParseAndAddXmlField(match, fields, repeatingPaths);
+                    }
+
+                    // Handle special tags without Select attribute
+                    if (text.Contains("<Else>") || text.Contains("<Else />"))
+                    {
+                        // Else tags don't have Select attribute, skip them
+                    }
+                    if (text.Contains("<EndRepeat>") || text.Contains("<EndRepeat />") ||
+                        text.Contains("<EndConditional>") || text.Contains("<EndConditional />"))
+                    {
+                        // End tags don't have Select attribute, skip them
+                    }
+                }
             }
 
             // Fast extraction from plain paragraphs
@@ -238,6 +260,15 @@ namespace DocumentAssembler.Core
             if (!attributes.TryGetValue("Select", out var xpath) || string.IsNullOrWhiteSpace(xpath))
             {
                 return; // No Select attribute, skip
+            }
+
+            // Sanitize XPath: trim and remove any trailing slashes or invalid characters
+            xpath = xpath.Trim().TrimEnd('/', '>');
+
+            // Skip if XPath is invalid after sanitization
+            if (string.IsNullOrWhiteSpace(xpath))
+            {
+                return;
             }
 
             // Determine if optional
@@ -300,6 +331,15 @@ namespace DocumentAssembler.Core
                 return; // No Select attribute, skip
             }
 
+            // Sanitize XPath: trim and remove any trailing slashes or invalid characters
+            xpath = xpath.Trim().TrimEnd('/', '>');
+
+            // Skip if XPath is invalid after sanitization
+            if (string.IsNullOrWhiteSpace(xpath))
+            {
+                return;
+            }
+
             // Determine if optional
             var isOptional = true; // Default is true
             if (attributes.TryGetValue("Optional", out var optionalStr))
@@ -349,7 +389,13 @@ namespace DocumentAssembler.Core
                 for (int i = 0; i < parts.Length; i++)
                 {
                     var part = parts[i].Trim();
-                    if (string.IsNullOrWhiteSpace(part)) continue;
+                    if (string.IsNullOrWhiteSpace(part) || part == ".") continue; // Skip empty and current directory marker
+
+                    // Skip parts that would create invalid XML element names
+                    if (part.StartsWith("-") || char.IsDigit(part[0]))
+                    {
+                        continue;
+                    }
 
                     if (!currentNode.Children.ContainsKey(part))
                     {
@@ -455,15 +501,58 @@ namespace DocumentAssembler.Core
             foreach (var field in fields)
             {
                 var parts = field.XPath.Split('/');
-                if (parts.Length > 0 && !string.IsNullOrWhiteSpace(parts[0]))
+
+                // Find first valid element (skip "." for relative paths like "./Customer")
+                string? root = null;
+                foreach (var part in parts)
                 {
-                    var root = parts[0].Trim();
+                    var trimmedPart = part.Trim();
+                    if (string.IsNullOrEmpty(trimmedPart) || trimmedPart == ".")
+                    {
+                        continue; // Skip empty parts and current directory marker
+                    }
+
+                    // Skip invalid XML element names
+                    if (trimmedPart.StartsWith("-") || char.IsDigit(trimmedPart[0]))
+                    {
+                        continue;
+                    }
+
+                    root = trimmedPart;
+                    break; // Found first valid element
+                }
+
+                if (root != null)
+                {
                     rootCounts[root] = rootCounts.GetValueOrDefault(root, 0) + 1;
                 }
             }
 
             if (rootCounts.Count > 0)
             {
+                // If there's exactly one unique root, use it
+                if (rootCounts.Count == 1)
+                {
+                    return rootCounts.First().Key;
+                }
+
+                // Check if any fields have hierarchical structure (meaningful nesting beyond current dir)
+                // e.g., "./Orders/Order" has hierarchy, but "./Name" doesn't
+                var hasHierarchy = fields.Any(f =>
+                {
+                    var parts = f.XPath.Split('/').Where(p => !string.IsNullOrWhiteSpace(p) && p != ".").ToArray();
+                    return parts.Length > 1;
+                });
+
+                // If there are multiple different roots all with count=1 AND no hierarchical structure
+                // then there's no clear winner - use "Data"
+                // This handles truly flat templates like: ./Field1, ./Field2, ./Field3
+                if (rootCounts.All(kvp => kvp.Value == 1) && !hasHierarchy)
+                {
+                    return "Data";
+                }
+
+                // Otherwise, return the most common root element (or first one if tied)
                 return rootCounts.OrderByDescending(kvp => kvp.Value).First().Key;
             }
 

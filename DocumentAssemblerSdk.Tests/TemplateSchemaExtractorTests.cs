@@ -1,5 +1,7 @@
 using DocumentAssembler.Core;
 using DocumentAssembler.Tests;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Wordprocessing;
 using System;
 using System.IO;
 using System.Linq;
@@ -171,11 +173,7 @@ namespace DocumentAssemblerSdk.Tests
         public void ExtractXmlSchema_EmptyTemplate_ShouldReturnEmptyResult()
         {
             // Arrange
-            var templatePath = Path.Combine(s_TestFilesDir, "DA001-TemplateDocument.docx");
-            var templateDoc = new WmlDocument(templatePath);
-
-            // Create a minimal template with no tags
-            var emptyDoc = new WmlDocument("Empty.docx", File.ReadAllBytes(templatePath));
+            var emptyDoc = CreateBlankTemplateDocument();
 
             // Act
             var result = TemplateSchemaExtractor.ExtractXmlSchema(emptyDoc);
@@ -317,6 +315,21 @@ namespace DocumentAssemblerSdk.Tests
             Assert.NotNull(result);
             Assert.NotEmpty(result.RootElementName);
             Assert.NotEqual("Data", result.RootElementName); // Should detect actual root like "Customer"
+        }
+
+        private static WmlDocument CreateBlankTemplateDocument()
+        {
+            using var ms = new MemoryStream();
+            using (var wordDoc = WordprocessingDocument.Create(ms, DocumentFormat.OpenXml.WordprocessingDocumentType.Document, true))
+            {
+                var mainPart = wordDoc.AddMainDocumentPart();
+                var document = new Document(new Body(new Paragraph(new Run(new Text(string.Empty)))));
+                mainPart.Document = document;
+                document.Save();
+            }
+
+            var bytes = ms.ToArray();
+            return new WmlDocument("Empty.docx", bytes);
         }
     }
 }

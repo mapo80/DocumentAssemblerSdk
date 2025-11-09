@@ -21,6 +21,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Example05_ConditionalElse",
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Example06_SchemaExtraction", "DocumentAssemblerSdk.Examples\Example06_SchemaExtraction\Example06_SchemaExtraction.csproj", "{5DECBB82-A915-435D-B918-3E25F9F23392}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Example07_ComplexSchemaExtraction", "DocumentAssemblerSdk.Examples\Example07_ComplexSchemaExtraction\Example07_ComplexSchemaExtraction.csproj", "{8556B179-12B4-49C5-9A2D-247C56E53422}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -62,6 +64,10 @@ Global
 		{5DECBB82-A915-435D-B918-3E25F9F23392}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{5DECBB82-A915-435D-B918-3E25F9F23392}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{5DECBB82-A915-435D-B918-3E25F9F23392}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8556B179-12B4-49C5-9A2D-247C56E53422}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8556B179-12B4-49C5-9A2D-247C56E53422}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8556B179-12B4-49C5-9A2D-247C56E53422}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8556B179-12B4-49C5-9A2D-247C56E53422}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{493A1309-A648-4DC7-9493-20F26AD039C2} = {5740778B-CE1D-4761-A24E-08F57FC2E2B7}
@@ -70,5 +76,6 @@ Global
 		{21218C74-EF98-4F3A-8090-C28DC6B036DC} = {5740778B-CE1D-4761-A24E-08F57FC2E2B7}
 		{2A886C74-1A80-4DEF-B25A-6EA34FB73A84} = {5740778B-CE1D-4761-A24E-08F57FC2E2B7}
 		{5DECBB82-A915-435D-B918-3E25F9F23392} = {5740778B-CE1D-4761-A24E-08F57FC2E2B7}
+		{8556B179-12B4-49C5-9A2D-247C56E53422} = {5740778B-CE1D-4761-A24E-08F57FC2E2B7}
 	EndGlobalSection
 EndGlobal
