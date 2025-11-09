@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Customer>
+  <FirstName>John</FirstName>
+  <LastName>Doe</LastName>
+  <!-- MiddleName is intentionally missing -->
+  <Email>john@example.com</Email>
+</Customer>

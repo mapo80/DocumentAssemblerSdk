@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Customer>
+  <Name>John Doe</Name>
+  <MiddleName>Robert</MiddleName>
+  <Email>john@example.com</Email>
+  <Phone>+1-555-1234</Phone>
+</Customer>

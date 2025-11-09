@@ -19,24 +19,24 @@ namespace DocumentAssembler.Tests
         [Theory]
         [InlineData("DA001-TemplateDocument.docx", "DA-Data.xml", false)]
         [InlineData("DA002-TemplateDocument.docx", "DA-DataNotHighValueCust.xml", false)]
-        [InlineData("DA003-Select-XPathFindsNoData.docx", "DA-Data.xml", true)]
+        [InlineData("DA003-Select-XPathFindsNoData.docx", "DA-Data.xml", false)]  // Changed: Optional=true by default
         [InlineData("DA004-Select-XPathFindsNoDataOptional.docx", "DA-Data.xml", false)]
-        [InlineData("DA005-SelectRowData-NoData.docx", "DA-Data.xml", true)]
-        [InlineData("DA006-SelectTestValue-NoData.docx", "DA-Data.xml", true)]
-        [InlineData("DA007-SelectRepeatingData-NoData.docx", "DA-Data.xml", true)]
+        [InlineData("DA005-SelectRowData-NoData.docx", "DA-Data.xml", true)]  // Table-related, still fails
+        [InlineData("DA006-SelectTestValue-NoData.docx", "DA-Data.xml", true)]  // Conditional-related, still fails
+        [InlineData("DA007-SelectRepeatingData-NoData.docx", "DA-Data.xml", false)]  // Changed: Optional=true by default
         [InlineData("DA008-TableElementWithNoTable.docx", "DA-Data.xml", true)]
         [InlineData("DA009-InvalidXPath.docx", "DA-Data.xml", true)]
         [InlineData("DA010-InvalidXml.docx", "DA-Data.xml", true)]
         [InlineData("DA011-SchemaError.docx", "DA-Data.xml", true)]
         [InlineData("DA012-OtherMarkupTypes.docx", "DA-Data.xml", true)]
         [InlineData("DA013-Runs.docx", "DA-Data.xml", false)]
-        [InlineData("DA014-TwoRuns-NoValuesSelected.docx", "DA-Data.xml", true)]
+        [InlineData("DA014-TwoRuns-NoValuesSelected.docx", "DA-Data.xml", false)]  // Changed: Optional=true by default
         [InlineData("DA015-TwoRunsXmlExceptionInFirst.docx", "DA-Data.xml", true)]
         [InlineData("DA016-TwoRunsSchemaErrorInSecond.docx", "DA-Data.xml", true)]
-        [InlineData("DA017-FiveRuns.docx", "DA-Data.xml", true)]
+        [InlineData("DA017-FiveRuns.docx", "DA-Data.xml", false)]  // Changed: Optional=true by default
         [InlineData("DA018-SmartQuotes.docx", "DA-Data.xml", false)]
         [InlineData("DA019-RunIsEntireParagraph.docx", "DA-Data.xml", false)]
-        [InlineData("DA020-TwoRunsAndNoOtherContent.docx", "DA-Data.xml", true)]
+        [InlineData("DA020-TwoRunsAndNoOtherContent.docx", "DA-Data.xml", false)]  // Changed: Optional=true by default
         [InlineData("DA021-NestedRepeat.docx", "DA-DataNestedRepeat.xml", false)]
         [InlineData("DA022-InvalidXPath.docx", "DA-Data.xml", true)]
         [InlineData("DA023-RepeatWOEndRepeat.docx", "DA-Data.xml", true)]
@@ -45,7 +45,7 @@ namespace DocumentAssembler.Tests
         [InlineData("DA028-NoPrototypeRow.docx", "DA-Data.xml", true)]
         [InlineData("DA029-NoDataForCell.docx", "DA-Data.xml", true)]
         [InlineData("DA030-TooMuchDataForCell.docx", "DA-TooMuchDataForCell.xml", true)]
-        [InlineData("DA031-CellDataInAttributes.docx", "DA-CellDataInAttributes.xml", true)]
+        [InlineData("DA031-CellDataInAttributes.docx", "DA-CellDataInAttributes.xml", false)]  // Changed: Optional=true by default
         [InlineData("DA032-TooMuchDataForConditional.docx", "DA-TooMuchDataForConditional.xml", true)]
         [InlineData("DA033-ConditionalOnAttribute.docx", "DA-ConditionalOnAttribute.xml", false)]
         [InlineData("DA034-HeaderFooter.docx", "DA-Data.xml", false)]
@@ -56,23 +56,23 @@ namespace DocumentAssembler.Tests
         [InlineData("DA102-TemplateDocument.docx", "DA-Data.xml", true)]
         [InlineData("DA201-TemplateDocument.docx", "DA-Data.xml", false)]
         [InlineData("DA202-TemplateDocument.docx", "DA-DataNotHighValueCust.xml", false)]
-        [InlineData("DA203-Select-XPathFindsNoData.docx", "DA-Data.xml", true)]
+        [InlineData("DA203-Select-XPathFindsNoData.docx", "DA-Data.xml", false)]  // Changed: Optional=true by default
         [InlineData("DA204-Select-XPathFindsNoDataOptional.docx", "DA-Data.xml", false)]
-        [InlineData("DA205-SelectRowData-NoData.docx", "DA-Data.xml", true)]
-        [InlineData("DA206-SelectTestValue-NoData.docx", "DA-Data.xml", true)]
-        [InlineData("DA207-SelectRepeatingData-NoData.docx", "DA-Data.xml", true)]
+        [InlineData("DA205-SelectRowData-NoData.docx", "DA-Data.xml", true)]  // Table-related, still fails
+        [InlineData("DA206-SelectTestValue-NoData.docx", "DA-Data.xml", true)]  // Conditional-related, still fails
+        [InlineData("DA207-SelectRepeatingData-NoData.docx", "DA-Data.xml", false)]  // Changed: Optional=true by default
         [InlineData("DA209-InvalidXPath.docx", "DA-Data.xml", true)]
         [InlineData("DA210-InvalidXml.docx", "DA-Data.xml", true)]
         [InlineData("DA211-SchemaError.docx", "DA-Data.xml", true)]
         [InlineData("DA212-OtherMarkupTypes.docx", "DA-Data.xml", true)]
         [InlineData("DA213-Runs.docx", "DA-Data.xml", false)]
-        [InlineData("DA214-TwoRuns-NoValuesSelected.docx", "DA-Data.xml", true)]
+        [InlineData("DA214-TwoRuns-NoValuesSelected.docx", "DA-Data.xml", false)]  // Changed: Optional=true by default
         [InlineData("DA215-TwoRunsXmlExceptionInFirst.docx", "DA-Data.xml", true)]
         [InlineData("DA216-TwoRunsSchemaErrorInSecond.docx", "DA-Data.xml", true)]
-        [InlineData("DA217-FiveRuns.docx", "DA-Data.xml", true)]
+        [InlineData("DA217-FiveRuns.docx", "DA-Data.xml", false)]  // Changed: Optional=true by default
         [InlineData("DA218-SmartQuotes.docx", "DA-Data.xml", false)]
         [InlineData("DA219-RunIsEntireParagraph.docx", "DA-Data.xml", false)]
-        [InlineData("DA220-TwoRunsAndNoOtherContent.docx", "DA-Data.xml", true)]
+        [InlineData("DA220-TwoRunsAndNoOtherContent.docx", "DA-Data.xml", false)]  // Changed: Optional=true by default
         [InlineData("DA221-NestedRepeat.docx", "DA-DataNestedRepeat.xml", false)]
         [InlineData("DA222-InvalidXPath.docx", "DA-Data.xml", true)]
         [InlineData("DA223-RepeatWOEndRepeat.docx", "DA-Data.xml", true)]
@@ -81,7 +81,7 @@ namespace DocumentAssembler.Tests
         [InlineData("DA228-NoPrototypeRow.docx", "DA-Data.xml", true)]
         [InlineData("DA229-NoDataForCell.docx", "DA-Data.xml", true)]
         [InlineData("DA230-TooMuchDataForCell.docx", "DA-TooMuchDataForCell.xml", true)]
-        [InlineData("DA231-CellDataInAttributes.docx", "DA-CellDataInAttributes.xml", true)]
+        [InlineData("DA231-CellDataInAttributes.docx", "DA-CellDataInAttributes.xml", false)]  // Changed: Optional=true by default
         [InlineData("DA232-TooMuchDataForConditional.docx", "DA-TooMuchDataForConditional.xml", true)]
         [InlineData("DA233-ConditionalOnAttribute.docx", "DA-ConditionalOnAttribute.xml", false)]
         [InlineData("DA234-HeaderFooter.docx", "DA-Data.xml", false)]
@@ -96,7 +96,7 @@ namespace DocumentAssembler.Tests
         [InlineData("DA253-Table-With-Sum-Run-Level-CC.docx", "DA-Data.xml", false)]
         [InlineData("DA254-Table-With-XPath-Sum.docx", "DA-Data.xml", false)]
         [InlineData("DA255-Table-With-XPath-Sum-Run-Level-CC.docx", "DA-Data.xml", false)]
-        [InlineData("DA256-NoInvalidDocOnErrorInRun.docx", "DA-Data.xml", true)]
+        [InlineData("DA256-NoInvalidDocOnErrorInRun.docx", "DA-Data.xml", false)]  // Changed: Optional=true by default
         [InlineData("DA257-OptionalRepeat.docx", "DA-Data.xml", false)]
         [InlineData("DA258-ContentAcceptsCharsAsXPathResult.docx", "DA-Data.xml", false)]
         [InlineData("DA259-MultiLineContents.docx", "DA-Data.xml", false)]
@@ -106,7 +106,7 @@ namespace DocumentAssembler.Tests
         [InlineData("DA263-ConditionalNotMatch.docx", "DA-DataSmallCustomer.xml", false)]
         [InlineData("DA264-InvalidRunLevelRepeat.docx", "DA-Data.xml", true)]
         [InlineData("DA265-RunLevelRepeatWithWhiteSpaceBefore.docx", "DA-Data.xml", false)]
-        [InlineData("DA266-RunLevelRepeat-NoData.docx", "DA-Data.xml", true)]
+        [InlineData("DA266-RunLevelRepeat-NoData.docx", "DA-Data.xml", false)]  // Changed: Optional=true by default
         [InlineData("DA270-ConditionalWithElse.docx", "DA-ElseTestPremium.xml", false)]
         [InlineData("DA270-ConditionalWithElse.docx", "DA-ElseTestStandard.xml", false)]
         [InlineData("DA271-ConditionalWithElseNotMatch.docx", "DA-ElseTestPremium.xml", false)]

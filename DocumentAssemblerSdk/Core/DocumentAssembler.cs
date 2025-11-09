@@ -82,6 +82,14 @@ namespace DocumentAssembler.Core
             // do the actual content replacement
             xDocRoot = ContentReplacementTransform(xDocRoot, data, te, part) as XElement;
 
+            // Note: Error collection is done during processing. Errors are indicated by:
+            // 1. The templateError boolean flag (te.HasError)
+            // 2. Inline error placeholders in the document (e.g., "[ERROR: Missing field]")
+            // 3. The comprehensive error summary available via te.GetErrorSummary()
+            //
+            // We don't insert the error summary as paragraphs to avoid schema validation issues.
+            // Users can access the full error list programmatically via the TemplateError object.
+
             xDoc.Elements().First().ReplaceWith(xDocRoot);
             part.PutXDocument();
             return;
@@ -387,17 +395,11 @@ namespace DocumentAssembler.Core
                     }
 
                     var optionalString = (string?)element.Attribute(PA.Optional);
-                    var optional = bool.TryParse(optionalString, out var optionalValue) && optionalValue;
+                    // Default is true (optional by default), unless explicitly set to false
+                    var optional = optionalString == null || !bool.TryParse(optionalString, out var optionalValue) || optionalValue;
 
-                    string newValue;
-                    try
-                    {
-                        newValue = EvaluateXPathToString(data, xPath, optional);
-                    }
-                    catch (XPathException e)
-                    {
-                        return CreateContextErrorMessage(element, "XPathException: " + e.Message, templateError);
-                    }
+                    // EvaluateXPathToString now collects errors instead of throwing
+                    string newValue = EvaluateXPathToString(data, xPath, optional, templateError);
 
                     if (para != null)
                     {
@@ -437,22 +439,16 @@ namespace DocumentAssembler.Core
                     }
 
                     var optionalString = (string?)element.Attribute(PA.Optional);
-                    var optional = bool.TryParse(optionalString, out var optionalValue) && optionalValue;
+                    // Default is true (optional by default), unless explicitly set to false
+                    var optional = optionalString == null || !bool.TryParse(optionalString, out var optionalValue) || optionalValue;
                     var alignString = (string?)element.Attribute(PA.Align);
                     var widthAttr = (string?)element.Attribute(PA.Width);
                     var heightAttr = (string?)element.Attribute(PA.Height);
                     var maxWidthAttr = (string?)element.Attribute(PA.MaxWidth);
                     var maxHeightAttr = (string?)element.Attribute(PA.MaxHeight);
 
-                    string base64Content;
-                    try
-                    {
-                        base64Content = EvaluateXPathToString(data, xPath, optional);
-                    }
-                    catch (XPathException e)
-                    {
-                        return CreateContextErrorMessage(element, "XPathException: " + e.Message, templateError);
-                    }
+                    // EvaluateXPathToString now collects errors instead of throwing
+                    string base64Content = EvaluateXPathToString(data, xPath, optional, templateError);
 
                     if (string.IsNullOrEmpty(base64Content))
                     {
@@ -504,7 +500,8 @@ namespace DocumentAssembler.Core
                     }
 
                     var optionalString = (string?)element.Attribute(PA.Optional);
-                    var optional = bool.TryParse(optionalString, out var optionalValue) && optionalValue;
+                    // Default is true (optional by default), unless explicitly set to false
+                    var optional = optionalString == null || !bool.TryParse(optionalString, out var optionalValue) || optionalValue;
 
                     IEnumerable<XElement> repeatingData;
                     try
@@ -597,20 +594,8 @@ namespace DocumentAssembler.Core
 
                                         var cellRun = paragraph.Elements(W.r).FirstOrDefault();
                                         var xPath = paragraph.Value;
-                                        string? newValue = null;
-                                        try
-                                        {
-                                            newValue = EvaluateXPathToString(d, xPath, false);
-                                        }
-                                        catch (XPathException e)
-                                        {
-                                            var errorCell = new XElement(W.tc,
-                                                tc.Elements().Where(z => z.Name != W.p),
-                                                new XElement(W.p,
-                                                    paragraph.Element(W.pPr),
-                                                    CreateRunErrorMessage(e.Message, templateError)));
-                                            return errorCell;
-                                        }
+                                        // EvaluateXPathToString now collects errors instead of throwing
+                                        string? newValue = EvaluateXPathToString(d, xPath, false, templateError);
 
                                         var newCell = new XElement(W.tc,
                                                    tc.Elements().Where(z => z.Name != W.p),
@@ -646,16 +631,8 @@ namespace DocumentAssembler.Core
                         return CreateContextErrorMessage(element, "Conditional: Cannot specify both Match and NotMatch", templateError);
                     }
 
-                    string? testValue = null;
-
-                    try
-                    {
-                        testValue = EvaluateXPathToString(data, xPath, false);
-                    }
-                    catch (XPathException e)
-                    {
-                        return CreateContextErrorMessage(element, e.Message, templateError);
-                    }
+                    // EvaluateXPathToString now collects errors instead of throwing
+                    string? testValue = EvaluateXPathToString(data, xPath, false, templateError);
 
                     var conditionIsTrue = (match != null && testValue == match) || (notMatch != null && testValue != notMatch);
 
@@ -725,7 +702,7 @@ namespace DocumentAssembler.Core
             return errorPara;
         }
 
-        private static string EvaluateXPathToString(XElement element, string xPath, bool optional)
+        private static string EvaluateXPathToString(XElement element, string xPath, bool optional, TemplateError templateError)
         {
             object xPathSelectResult;
             try
@@ -740,7 +717,10 @@ namespace DocumentAssembler.Core
             }
             catch (XPathException e)
             {
-                throw new XPathException("XPathException: " + e.Message, e);
+                // Collect XPath syntax errors instead of throwing
+                var errorMsg = "XPathException: " + e.Message;
+                templateError.AddError(errorMsg);
+                return "[ERROR: Invalid XPath]";
             }
 
             if ((xPathSelectResult is IEnumerable) && !(xPathSelectResult is string))
@@ -753,11 +733,16 @@ namespace DocumentAssembler.Core
                         return string.Empty;
                     }
 
-                    throw new XPathException(string.Format("XPath expression ({0}) returned no results", xPath));
+                    // Collect missing field error instead of throwing
+                    templateError.AddMissingField(xPath);
+                    return "[ERROR: Missing field]";
                 }
                 if (selectedData.Count() > 1)
                 {
-                    throw new XPathException(string.Format("XPath expression ({0}) returned more than one node", xPath));
+                    // Collect multiple results error instead of throwing
+                    var errorMsg = string.Format("XPath expression ({0}) returned more than one node", xPath);
+                    templateError.AddError(errorMsg);
+                    return "[ERROR: Multiple results]";
                 }
 
                 var selectedDatum = selectedData.First();
@@ -802,6 +787,44 @@ namespace DocumentAssembler.Core
         private class TemplateError
         {
             public bool HasError;
+            public List<string> MissingFields { get; } = new List<string>();
+            public List<string> AllErrors { get; } = new List<string>();
+
+            public void AddMissingField(string xpath)
+            {
+                HasError = true;
+                if (!MissingFields.Contains(xpath))
+                {
+                    MissingFields.Add(xpath);
+                    AllErrors.Add($"Missing field: {xpath}");
+                }
+            }
+
+            public void AddError(string errorMessage)
+            {
+                HasError = true;
+                if (!AllErrors.Contains(errorMessage))
+                {
+                    AllErrors.Add(errorMessage);
+                }
+            }
+
+            public string GetErrorSummary()
+            {
+                if (!HasError || AllErrors.Count == 0)
+                {
+                    return string.Empty;
+                }
+
+                if (MissingFields.Count > 0)
+                {
+                    return $"Template errors found:\n" +
+                           $"- Missing fields ({MissingFields.Count}): {string.Join(", ", MissingFields)}\n" +
+                           $"- Total errors: {AllErrors.Count}";
+                }
+
+                return $"Template errors found ({AllErrors.Count}):\n- " + string.Join("\n- ", AllErrors);
+            }
         }
     }
 }

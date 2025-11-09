@@ -398,30 +398,124 @@ A Word document with the product name and a centered image
 scaled to fit within 400x300px while preserving aspect ratio.
 ```
 
-### 6. Optional (Optional Placeholders)
+### 6. Optional (Handling Missing Fields)
 
-Designate a placeholder as optional, preventing error messages if the data is missing.
+**NEW DEFAULT BEHAVIOR**: Fields are now **optional by default**. Missing fields will appear empty in the output without causing errors.
 
-**Syntax**: `<#Content Select="XPath" Optional="true"#>`
+To make a field **required** (causing an error if missing), explicitly set `Optional="false"`:
 
-**Example**:
+```
+<#Content Select="Customer/Name" Optional="false"#>
+```
+
+**Supported on**:
+- `Content` (text placeholders)
+- `Image` (image placeholders)
+- `Repeat` (repeating blocks)
+
+---
+
+**Syntax**:
+- `<#Content Select="XPath"#>` → Optional by default (no error if missing)
+- `<#Content Select="XPath" Optional="false"#>` → Required (error if missing)
+- `<#Content Select="XPath" Optional="true"#>` → Explicitly optional (for clarity)
+
+---
+
+**Example 1: Missing Field with Default Behavior (SUCCEEDS)**
+
 ```xml
 <!-- XML Data -->
 <Customer>
   <Name>John Doe</Name>
-  <!-- MiddleName is missing -->
-  <LastName>Doe</LastName>
+  <!-- MiddleName is MISSING -->
+  <LastName>Smith</LastName>
 </Customer>
 ```
 
 ```
-<!-- Template -->
-Full Name: <#Content Select="Customer/Name"#> <#Content Select="Customer/MiddleName" Optional="true"#> <#Content Select="Customer/LastName"#>
+<!-- Template (fields are optional by default) -->
+Full Name: <#Content Select="Customer/Name"#> <#Content Select="Customer/MiddleName"#> <#Content Select="Customer/LastName"#>
 
-<!-- Output -->
-Full Name: John Doe  Doe
-(No error for missing MiddleName)
+<!-- Output: SUCCESS ✅ -->
+Full Name: John Doe  Smith
+(MiddleName is missing, appears as empty - no error!)
 ```
+
+---
+
+**Example 2: Required Field Missing (FAILS)**
+
+```xml
+<!-- XML Data -->
+<Customer>
+  <Email>john@example.com</Email>
+  <!-- Name is MISSING -->
+</Customer>
+```
+
+```
+<!-- Template with Optional="false" to REQUIRE the field -->
+Customer Name: <#Content Select="Customer/Name" Optional="false"#>
+
+<!-- Result: ERROR ❌ -->
+XPathException: XPath expression (Customer/Name) returned no results
+Document generation FAILS
+(Use Optional="false" when a field is absolutely required)
+```
+
+---
+
+**Example 3: Image (Optional by Default)**
+
+```xml
+<!-- XML Data -->
+<Product>
+  <Name>Basic Widget</Name>
+  <!-- Photo is MISSING -->
+</Product>
+```
+
+```
+<!-- Template (Image is optional by default) -->
+Product: <#Content Select="Product/Name"#>
+<#Image Select="Product/Photo" MaxWidth="200px"#>
+
+<!-- Output: SUCCESS ✅ -->
+Product: Basic Widget
+(No image shown, no error - images are optional by default)
+```
+
+---
+
+**Example 4: Repeat (Optional by Default)**
+
+```xml
+<!-- XML Data -->
+<Report>
+  <Title>Annual Summary</Title>
+  <!-- Items collection is MISSING -->
+</Report>
+```
+
+```
+<!-- Template (Repeat is optional by default) -->
+<#Repeat Select="Report/Items/Item"#>
+- <#Content Select="./Name"#>
+<#EndRepeat#>
+
+<!-- Output: SUCCESS ✅ -->
+(No items repeated, no error - Repeat is optional by default)
+```
+
+---
+
+**Best Practices**:
+1. ✅ **Fields are optional by default** - no need to add `Optional="true"` unless for clarity
+2. ✅ **Use `Optional="false"` for critical fields** that must always be present (IDs, names, required info)
+3. ✅ **Test your templates with data that has missing fields** to verify graceful handling
+4. ✅ **Combine with Conditional tags** for more complex logic when fields are missing
+5. 📝 **Backward compatibility**: Old templates with `Optional="true"` continue to work identically
 
 ## Quick Start
 
