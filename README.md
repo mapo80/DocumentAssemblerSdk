@@ -517,6 +517,87 @@ Product: Basic Widget
 4. ✅ **Combine with Conditional tags** for more complex logic when fields are missing
 5. 📝 **Backward compatibility**: Old templates with `Optional="true"` continue to work identically
 
+## XML Schema Extraction
+
+**NEW**: Extract required XML schema from existing DOCX templates! This feature analyzes your templates and automatically generates the XML structure needed to populate them.
+
+### Use Cases
+
+- **Reverse-engineer templates** - Understand what data a template needs
+- **API integration** - Generate XML schemas for automated document generation
+- **Documentation** - Create data specifications from templates
+- **Validation** - Ensure your XML data matches template requirements
+- **Onboarding** - Help new developers understand template structure
+
+### Usage
+
+```csharp
+using DocumentAssembler.Core;
+
+// Load your template
+var templateDoc = new WmlDocument("MyTemplate.docx");
+
+// Extract the schema
+var result = TemplateSchemaExtractor.ExtractXmlSchema(templateDoc);
+
+// Get formatted XML template
+Console.WriteLine(result.ToFormattedXml());
+
+// Analyze discovered fields
+Console.WriteLine($"Found {result.Fields.Count} field(s)");
+Console.WriteLine($"Root element: {result.RootElementName}");
+
+// Inspect field details
+foreach (var field in result.Fields)
+{
+    Console.WriteLine($"{field.TagType}: {field.XPath}");
+    Console.WriteLine($"  Optional: {field.IsOptional}");
+    Console.WriteLine($"  Repeating: {field.IsRepeating}");
+}
+```
+
+### Example Output
+
+Given a template with these tags:
+```
+<#Content Select="Customer/Name"#>
+<#Content Select="Customer/Email"#>
+<#Repeat Select="Customer/Orders"#>
+  <#Content Select="Product"#>
+  <#Content Select="Quantity"#>
+<#EndRepeat#>
+```
+
+The extractor generates:
+```xml
+<Data>
+  <Customer>
+    <Name>[value] <!-- Optional --></Name>
+    <Email>[value] <!-- Optional --></Email>
+    <Orders> <!-- Repeating -->
+      <Product>[value] <!-- Optional --></Product>
+      <Quantity>[value] <!-- Optional --></Quantity>
+    </Orders>
+    <Orders> <!-- Repeating -->
+      <Product>[value] <!-- Optional --></Product>
+      <Quantity>[value] <!-- Optional --></Quantity>
+    </Orders>
+  </Customer>
+</Data>
+```
+
+### Features
+
+- ✅ **Ultra-fast** - Single-pass extraction (< 100ms typical)
+- ✅ **Dual format support** - Handles both `<#Tag#>` and `<Tag />` formats
+- ✅ **HTML entity decoding** - Processes Word-escaped content (&lt; → <)
+- ✅ **Optional/required detection** - Respects Optional attribute
+- ✅ **Repeating structure detection** - Identifies Repeat/Table collections
+- ✅ **Hierarchical XML generation** - Builds proper nested structure
+- ✅ **Smart root element inference** - Detects common root element name
+
+See [Example06_SchemaExtraction](DocumentAssemblerSdk.Examples/Example06_SchemaExtraction/) for a complete working example.
+
 ## Quick Start
 
 ### Installation
