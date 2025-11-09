@@ -32,6 +32,15 @@ The DocumentAssembler SDK enables **template-based document generation** by merg
 
 The SDK supports six types of template tags, all using the format `<#TagName ... #>`:
 
+| Tag | Purpose | When to Use |
+|-----|---------|-------------|
+| **Content** | Insert a single value from XML data | Display simple data fields (names, emails, dates, etc.) |
+| **Table** | Generate dynamic table rows from a collection | Create tables with variable number of rows (order items, invoices, etc.) |
+| **Conditional** | Include/exclude content based on conditions | Show different content based on data values (membership status, country-specific text) |
+| **Repeat** | Repeat content blocks for each item in a collection | Generate multiple paragraphs or sections (department summaries, product listings) |
+| **Image** | Insert images from base64-encoded data | Display dynamic images with size and alignment control (product photos, signatures) |
+| **Optional** | Mark placeholders as optional to avoid errors | Handle potentially missing data gracefully (middle names, optional fields) |
+
 ### 1. Content (Simple Data Binding)
 
 Insert a single value from your XML data.
