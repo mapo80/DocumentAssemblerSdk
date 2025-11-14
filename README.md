@@ -1,21 +1,22 @@
 # DocumentAssembler SDK
 
-A lightweight, standalone SDK for assembling Word documents from templates with XML data binding.
+A lightweight, standalone SDK for assembling Word documents from templates with XML data binding. The library ships with tooling, templates, tests, and helper scripts so you can automate DOCX generation end-to-end.
 
 ## Project Origin
 
-This SDK was **extracted from [OpenXmlPowerTools](https://github.com/EricWhiteDev/Open-Xml-PowerTools)**, a comprehensive toolkit for working with Open XML documents. We isolated the DocumentAssembler module to create a focused, maintainable library specifically for template-based document generation.
+This SDK was **extracted from [Codeuctivity/OpenXmlPowerTools](https://github.com/Codeuctivity/OpenXmlPowerTools)** to give the DocumentAssembler module its own home. We kept the original MIT license, modernized the codebase, and curated only the pieces required for template-based generation.
 
-### What We Did
+### What We Modernized
 
-- **Extracted** the DocumentAssembler module from OpenXmlPowerTools
-- **Modernized** to .NET 8.0 with nullable reference types enabled
-- **Cleaned up** 228 lines of dead code (unused classes, methods, and constructors)
-- **Fixed** all nullable warnings for improved type safety
-- **Split** large files into maintainable partial classes for better code organization
-- **Maintained** 100% test coverage (117/117 tests passing)
-- **Enhanced** with comprehensive image placeholder support (sizing, alignment, aspect ratio preservation)
-- **Added** Else tag for if-else logic in Conditional blocks with full nested support
+- **Targeted .NET 10.0** with nullable reference types, implicit usings, and analyzers enabled across the SDK, tests, examples, and tools.
+- **Split the original mega-file** into partial classes (`DocumentAssembler.cs`, `DocumentAssembler.Images.cs`, `DocumentAssembler.Signatures.cs`, `DocumentAssembler.Metadata.cs`) for maintainability.
+- **Cleaned up** hundreds of unused symbols and dead code while keeping the OpenXmlPowerTools primitives we still rely on (`WmlDocument`, `OpenXmlRegex`, `RevisionProcessor`, `UnicodeMapper`, etc.).
+- **Hardened metadata parsing**: inline `<#...#>` tokens and content controls are normalized, aliases validated, and invalid XML is turned into inline error runs instead of throwing.
+- **Upgraded the image pipeline** to SkiaSharp 3.119.1 with PNG/JPEG/GIF fallbacks, width/height/max-dimension attributes, and paragraph-level alignment metadata.
+- **Introduced PDF-ready signature placeholders** (`<Signature .../>`) backed by `SignaturePlaceholderSerializer` so DOCX → PDF pipelines can promote them to AcroForm fields.
+- **Added a high-performance `TemplateSchemaExtractor`** that emits XML templates, optional-aware XSDs, and even lists native MailMerge fields.
+- **Expanded documentation and examples** (15 sample projects plus generation scripts) so every tag/feature has a runnable template.
+- **Maintained a broad xUnit suite** that covers DocumentAssembler core logic, schema extraction, revision processors, regex utilities, Unicode mapping, and signature tags with **85.7 % line coverage / 72.5 % branch coverage** (see "Testing & Quality").
 
 ## Project Objective
 
@@ -31,7 +32,7 @@ The DocumentAssembler SDK enables **template-based document generation** by merg
 
 ## Supported Template Tags
 
-The SDK supports seven types of template tags, all using the format `<#TagName ... #>`:
+The SDK supports eight template tags using the `<#TagName ... #>` syntax, plus optional attributes that control behavior.
 
 | Tag | Purpose | When to Use |
 |-----|---------|-------------|
@@ -41,7 +42,10 @@ The SDK supports seven types of template tags, all using the format `<#TagName .
 | **Else** | Provide alternative content when condition is false | Create if-else logic within Conditional blocks (show premium vs standard content) |
 | **Repeat** | Repeat content blocks for each item in a collection | Generate multiple paragraphs or sections (department summaries, product listings) |
 | **Image** | Insert images from base64-encoded data | Display dynamic images with size and alignment control (product photos, signatures) |
-| **Optional** | Mark placeholders as optional to avoid errors | Handle potentially missing data gracefully (middle names, optional fields) |
+| **Signature** | Emit PDF-ready signature placeholders | Reserve signing spots with labels, size hints, and metadata |
+| **Optional** | Flag placeholders as optional/required | Handle potentially missing data gracefully (middle names, optional fields) |
+
+---
 
 ### 1. Content (Simple Data Binding)
 
@@ -225,102 +229,6 @@ Thank you for being our customer!
   • Estimated delivery: 10-15 business days
   • Customs fees may apply
 <#Else#>
-📦 Domestic USA shipping:
-  • FREE shipping on all orders!
-  • Estimated delivery: 2-3 business days
-<#EndConditional#>
-```
-
-```
-<!-- Output (when Country = "Canada", "UK", etc. - anything except "USA") -->
-📦 International shipping:
-  • Shipping costs apply based on location
-  • Estimated delivery: 10-15 business days
-  • Customs fees may apply
-
-<!-- Output (when Country = "USA") -->
-📦 Domestic USA shipping:
-  • FREE shipping on all orders!
-  • Estimated delivery: 2-3 business days
-```
-
----
-
-**Example 3: Nested Conditionals with Else (Advanced)**
-
-You can nest Conditional blocks with Else inside other Conditionals for complex logic.
-
-```xml
-<!-- XML Data -->
-<Customer>
-  <MembershipType>Premium</MembershipType>
-  <Points>5000</Points>
-</Customer>
-```
-
-```
-<!-- Template -->
-<#Conditional Select="Customer/MembershipType" Match="Premium"#>
-🌟 Premium Member Benefits:
-
-  <#Conditional Select="Customer/Points" Match="5000"#>
-  ⭐ PLATINUM TIER - You've reached 5000 points!
-    • Exclusive access to VIP lounge
-    • Personal account manager
-    • 25% discount on all purchases
-  <#Else#>
-  You have Premium status
-    • 20% discount on purchases
-    • Priority support
-  <#EndConditional#>
-
-<#Else#>
-Standard Member Benefits:
-  • 5% discount on purchases
-  • Email support available
-<#EndConditional#>
-```
-
-```
-<!-- Output (when MembershipType = "Premium" AND Points = 5000) -->
-🌟 Premium Member Benefits:
-
-  ⭐ PLATINUM TIER - You've reached 5000 points!
-    • Exclusive access to VIP lounge
-    • Personal account manager
-    • 25% discount on all purchases
-
-<!-- Output (when MembershipType = "Premium" AND Points ≠ 5000) -->
-🌟 Premium Member Benefits:
-
-  You have Premium status
-    • 20% discount on purchases
-    • Priority support
-
-<!-- Output (when MembershipType ≠ "Premium") -->
-Standard Member Benefits:
-  • 5% discount on purchases
-  • Email support available
-```
-
----
-
-**Example 4: Numeric Value Matching**
-
-The Conditional tag works with numeric values as well as strings.
-
-```xml
-<!-- XML Data -->
-<Order>
-  <TotalAmount>150</TotalAmount>
-</Order>
-```
-
-```
-<!-- Template -->
-<#Conditional Select="Order/TotalAmount" Match="150"#>
-🎉 Your order qualifies for a special bonus!
-<#Else#>
 Add more items to unlock bonus rewards.
 <#EndConditional#>
 ```
@@ -370,11 +278,9 @@ Insert images from base64-encoded data with optional sizing and alignment metada
 **Syntax**: `<#Image Select="XPathToBase64Data"#>`
 
 **Supported Metadata Attributes**:
-- `Align`: left, center, right, or justify
-- `Width`: explicit width (e.g., "300px", "5cm")
-- `Height`: explicit height (e.g., "200px", "3in")
-- `MaxWidth`: maximum width constraint
-- `MaxHeight`: maximum height constraint
+- `Align`: left, center, right, justify, start, end, distribute
+- `Width` / `Height`: explicit dimensions (`px`, `pt`, `cm`, `mm`, `in`, `emu`)
+- `MaxWidth` / `MaxHeight`: clamp dimensions while preserving aspect ratio
 
 **Example**:
 ```xml
@@ -400,9 +306,7 @@ scaled to fit within 400x300px while preserving aspect ratio.
 
 ### 6. Optional (Handling Missing Fields)
 
-**NEW DEFAULT BEHAVIOR**: Fields are now **optional by default**. Missing fields will appear empty in the output without causing errors.
-
-To make a field **required** (causing an error if missing), explicitly set `Optional="false"`:
+**NEW DEFAULT BEHAVIOR**: Fields are **optional by default**. Missing fields render as empty content without failing the assembly. Explicitly set `Optional="false"` when a field must exist.
 
 ```
 <#Content Select="Customer/Name" Optional="false"#>
@@ -413,115 +317,58 @@ To make a field **required** (causing an error if missing), explicitly set `Opti
 - `Image` (image placeholders)
 - `Repeat` (repeating blocks)
 
----
+See the examples in this section for success/failure scenarios.
+
+### 7. Signature (PDF-ready Signature Blocks)
+
+Embed visible signature lines plus hidden metadata so downstream PDF pipelines can promote them to `/Sig` AcroForm widgets.
 
 **Syntax**:
-- `<#Content Select="XPath"#>` → Optional by default (no error if missing)
-- `<#Content Select="XPath" Optional="false"#>` → Required (error if missing)
-- `<#Content Select="XPath" Optional="true"#>` → Explicitly optional (for clarity)
-
----
-
-**Example 1: Missing Field with Default Behavior (SUCCEEDS)**
-
-```xml
-<!-- XML Data -->
-<Customer>
-  <Name>John Doe</Name>
-  <!-- MiddleName is MISSING -->
-  <LastName>Smith</LastName>
-</Customer>
+```
+<#Signature Id="Responsabile"
+            Label="Firma Responsabile"
+            Width="220px"
+            Height="60px"
+            PageHint="2" />
 ```
 
-```
-<!-- Template (fields are optional by default) -->
-Full Name: <#Content Select="Customer/Name"#> <#Content Select="Customer/MiddleName"#> <#Content Select="Customer/LastName"#>
+**Attributes**:
+- `Id` (**required**): unique identifier used as the PDF field name.
+- `Label`: visible text shown next to the signature line (defaults to "Signature").
+- `Width` / `Height`: optional size hints (any `px/cm/mm/in/pt/emu` unit).
+- `PageHint`: optional positive integer to help external tools position the signature in multi-page PDFs.
 
-<!-- Output: SUCCESS ✅ -->
-Full Name: John Doe  Smith
-(MiddleName is missing, appears as empty - no error!)
-```
+When the assembler encounters `<Signature>`, it emits two runs:
+1. A visible line such as `Firma Responsabile ____________________` so Word users see the signing spot.
+2. A hidden run containing a Base64 payload wrapped in `[[DA_SIGN::...]]` (see `SignaturePlaceholderSerializer`). PDF converters scan for that token and create sealed signature fields with the captured metadata.
 
----
+See [Example08_Signature](DocumentAssemblerSdk.Examples/Example08_Signature/) for a runnable template.
 
-**Example 2: Required Field Missing (FAILS)**
+## Under the Hood
 
-```xml
-<!-- XML Data -->
-<Customer>
-  <Email>john@example.com</Email>
-  <!-- Name is MISSING -->
-</Customer>
-```
+Inside `DocumentAssembler.Core` the pipeline:
 
-```
-<!-- Template with Optional="false" to REQUIRE the field -->
-Customer Name: <#Content Select="Customer/Name" Optional="false"#>
+- Loads a `WmlDocument` into memory, rejects templates that still have tracked revisions (`RevisionAccepter.HasTrackedRevisions`).
+- Traverses **all content parts** (main document, headers, footers, footnotes, endnotes) so metadata can live anywhere inside the DOCX package.
+- Normalizes content controls (`TransformToMetadata`) and inline `<#...#>` tokens, enforcing alias consistency and replacing malformed XML with inline highlighted error paragraphs.
+- Lifts run-level metadata (`ForceBlockLevelAsAppropriate`) and fixes mis-leveled tables/conditionals before replacing content.
+- Uses `XPathEvaluationContext` to cache XPath evaluations per data node, drastically reducing repeated XPath compilation and enabling consistent error reporting.
+- Collects missing fields, invalid XPath expressions, and schema mismatches in a `TemplateError` object; callers can inspect the boolean `templateError` and the string `templateErrorSummary` returned by `AssembleDocument`.
+- Streams images directly into OpenXML `ImagePart`s, auto-incrementing drawing IDs with `ImageIdTracker` so headers/footers remain valid.
+- Serializes signature metadata via `SignaturePlaceholderSerializer` (Base64-encoded JSON inside `[[DA_SIGN::...]]`).
 
-<!-- Result: ERROR ❌ -->
-XPathException: XPath expression (Customer/Name) returned no results
-Document generation FAILS
-(Use Optional="false" when a field is absolutely required)
-```
+### Supporting Infrastructure
 
----
+- `DocumentAssemblerSdk/Documents` provides `OpenXmlPowerToolsDocument` + `WmlDocument` wrappers for easy LINQ-to-XML traversal of parts.
+- `DocumentAssemblerSdk/Utilities` includes:
+  - `OpenXmlRegex` for regex replacements on OpenXML runs (with optional revision tracking).
+  - `RevisionAccepter` and `RevisionProcessor` helpers to accept/reject tracked changes.
+  - `UnicodeMapper`, `FontMetric`, `PtOpenXmlUtil`, and namespace helpers used by complex templates (see Example10 fonts).
+- `Exceptions/` contains domain exceptions (`OpenXmlPowerToolsException`, `PowerToolsDocumentException`).
 
-**Example 3: Image (Optional by Default)**
+## Template Schema Extraction & Mail Merge Discovery
 
-```xml
-<!-- XML Data -->
-<Product>
-  <Name>Basic Widget</Name>
-  <!-- Photo is MISSING -->
-</Product>
-```
-
-```
-<!-- Template (Image is optional by default) -->
-Product: <#Content Select="Product/Name"#>
-<#Image Select="Product/Photo" MaxWidth="200px"#>
-
-<!-- Output: SUCCESS ✅ -->
-Product: Basic Widget
-(No image shown, no error - images are optional by default)
-```
-
----
-
-**Example 4: Repeat (Optional by Default)**
-
-```xml
-<!-- XML Data -->
-<Report>
-  <Title>Annual Summary</Title>
-  <!-- Items collection is MISSING -->
-</Report>
-```
-
-```
-<!-- Template (Repeat is optional by default) -->
-<#Repeat Select="Report/Items/Item"#>
-- <#Content Select="./Name"#>
-<#EndRepeat#>
-
-<!-- Output: SUCCESS ✅ -->
-(No items repeated, no error - Repeat is optional by default)
-```
-
----
-
-**Best Practices**:
-1. ✅ **Fields are optional by default** - no need to add `Optional="true"` unless for clarity
-2. ✅ **Use `Optional="false"` for critical fields** that must always be present (IDs, names, required info)
-3. ✅ **Test your templates with data that has missing fields** to verify graceful handling
-4. ✅ **Combine with Conditional tags** for more complex logic when fields are missing
-5. 📝 **Backward compatibility**: Old templates with `Optional="true"` continue to work identically
-
-## XML Schema Extraction
-
-**NEW**: Extract required XML schema from existing DOCX templates! This feature analyzes your templates and automatically generates the XML structure needed to populate them.
-
-It now also emits an optional-aware XSD (`result.XsdMarkup` or `result.ToFormattedXsd()`) so you can generate DTOs or validation artifacts that respect `minOccurs`/`maxOccurs` dictated by optional and repeating fields.
+Use `TemplateSchemaExtractor` to reverse-engineer templates, generate optional-aware XML/XSD stubs, and enumerate MailMerge fields.
 
 ### Use Cases
 
@@ -530,6 +377,7 @@ It now also emits an optional-aware XSD (`result.XsdMarkup` or `result.ToFormatt
 - **Documentation** - Create data specifications from templates
 - **Validation** - Ensure your XML data matches template requirements
 - **Onboarding** - Help new developers understand template structure
+- **MailMerge auditing** - Detect `MERGEFIELD` instructions alongside content controls
 
 ### Usage
 
@@ -542,29 +390,27 @@ var templateDoc = new WmlDocument("MyTemplate.docx");
 // Extract the schema
 var result = TemplateSchemaExtractor.ExtractXmlSchema(templateDoc);
 
-// Get formatted XML template
 Console.WriteLine(result.ToFormattedXml());
-
-// Get formatted XSD schema for DTO generation
-Console.WriteLine("\nGenerated XSD:");
 Console.WriteLine(result.ToFormattedXsd());
+Console.WriteLine($"Fields: {result.Fields.Count}");
+Console.WriteLine($"Root: {result.RootElementName}");
+```
 
-// Analyze discovered fields
-Console.WriteLine($"Found {result.Fields.Count} field(s)");
-Console.WriteLine($"Root element: {result.RootElementName}");
+### Mail Merge inspection helper
 
-// Inspect field details
-foreach (var field in result.Fields)
+```csharp
+var mergeFields = TemplateSchemaExtractor.ExtractMailMergeFields(templateDoc);
+foreach (var field in mergeFields)
 {
-    Console.WriteLine($"{field.TagType}: {field.XPath}");
-    Console.WriteLine($"  Optional: {field.IsOptional}");
-    Console.WriteLine($"  Repeating: {field.IsRepeating}");
+    Console.WriteLine($"{field.FieldName} => {field.XPath}");
 }
 ```
 
+The extractor walks every `MERGEFIELD` instruction, normalizes the MailMerge path (e.g. `«Customer.FirstName»` → `Customer/FirstName`), and exposes it via `FieldInfo` (`TagType == "MailMerge"`) and via the standalone `ExtractMailMergeFields` API. See Examples 11–15 for fixtures derived from real MailMerge templates.
+
 ### Example Output
 
-Given a template with these tags:
+Given a template with:
 ```
 <#Content Select="Customer/Name"#>
 <#Content Select="Customer/Email"#>
@@ -574,38 +420,29 @@ Given a template with these tags:
 <#EndRepeat#>
 ```
 
-The extractor generates:
-```xml
-<Data>
-  <Customer>
-    <Name>[value] <!-- Optional --></Name>
-    <Email>[value] <!-- Optional --></Email>
-    <Orders> <!-- Repeating -->
-      <Product>[value] <!-- Optional --></Product>
-      <Quantity>[value] <!-- Optional --></Quantity>
-    </Orders>
-    <Orders> <!-- Repeating -->
-      <Product>[value] <!-- Optional --></Product>
-      <Quantity>[value] <!-- Optional --></Quantity>
-    </Orders>
-  </Customer>
-</Data>
-```
+you will get a fully formatted XML + XSD stub (see `Sample XSD Output` below). Example06 and Example07 dump actual console output.
 
 ### Sample XSD Output
 
 ```xml
+<?xml version="1.0" encoding="utf-8"?>
 <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
-  <xs:element name="Customer">
+  <xs:element name="Data">
     <xs:complexType>
       <xs:sequence>
-        <xs:element name="Name" type="xs:string" minOccurs="0" />
-        <xs:element name="Email" type="xs:string" minOccurs="0" />
-        <xs:element name="Orders" minOccurs="0" maxOccurs="unbounded">
+        <xs:element name="Customer" minOccurs="0" maxOccurs="1">
           <xs:complexType>
             <xs:sequence>
-              <xs:element name="Product" type="xs:string" minOccurs="0" />
-              <xs:element name="Quantity" type="xs:string" minOccurs="0" />
+              <xs:element name="Name" type="xs:string" minOccurs="0" maxOccurs="1" />
+              <xs:element name="Email" type="xs:string" minOccurs="0" maxOccurs="1" />
+              <xs:element name="Orders" minOccurs="0" maxOccurs="unbounded">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="Product" type="xs:string" minOccurs="0" maxOccurs="1" />
+                    <xs:element name="Quantity" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
             </xs:sequence>
           </xs:complexType>
         </xs:element>
@@ -615,61 +452,55 @@ The extractor generates:
 </xs:schema>
 ```
 
-Optional fields surface as `minOccurs="0"`, and repeating structures gain `maxOccurs="unbounded"` so DTO generators can detect arrays.
-
 ### Features
 
-- ✅ **Ultra-fast** - Single-pass extraction (< 100ms typical)
-- ✅ **Dual format support** - Handles both `<#Tag#>` and `<Tag />` formats
-- ✅ **HTML entity decoding** - Processes Word-escaped content (&lt; → <)
-- ✅ **Optional/required detection** - Respects Optional attribute
-- ✅ **Repeating structure detection** - Identifies Repeat/Table collections
-- ✅ **Hierarchical XML generation** - Builds proper nested structure
-- ✅ **Smart root element inference** - Detects common root element name
-- ✅ **Optional-aware XSD output** - Includes `minOccurs`/`maxOccurs` hints so you can generate DTOs from `result.XsdMarkup`
+- ✅ **Automatic optional detection** - Respects the `Optional` attribute (defaults to true)
+- ✅ **Repeating structure detection** - Identifies `<#Repeat#>` and `<#Table#>` collections
+- ✅ **Hierarchical XML generation** - Builds proper nested structure from XPath expressions
+- ✅ **Smart root element naming** - Detects the most common root element name
+- ✅ **Conditional field handling** - Detects but doesn't include conditionals as data fields
+- ✅ **Image placeholder support** - Identifies image fields and adds Base64 comments
+- ✅ **Attribute preservation** - Captures tag attributes (Match, NotMatch, Align, etc.)
+- ✅ **XSD output** - Emits optional-aware XSD (`minOccurs`/`maxOccurs`) for DTO/validation generation
+- ✅ **MailMerge discovery** - Tags MailMerge fields (`TagType == "MailMerge"`) and exposes them via `ExtractMailMergeFields`
 
-See [Example06_SchemaExtraction](DocumentAssemblerSdk.Examples/Example06_SchemaExtraction/) for a complete working example.
+See:
+- [Example06_SchemaExtraction](DocumentAssemblerSdk.Examples/Example06_SchemaExtraction/) for basic extraction.
+- [Example07_ComplexSchemaExtraction](DocumentAssemblerSdk.Examples/Example07_ComplexSchemaExtraction/) for a full real-world template with 35+ fields.
+- Examples 11–15 for MailMerge-only, mixed, and CC-only templates that exercise the MailMerge inspector.
 
-## Quick Start
+## Example Suite
 
-### Installation
+| Example | Path | Highlights |
+|---------|------|------------|
+| Example 01 – Basic | `DocumentAssemblerSdk.Examples/Example01_Basic` | Minimal console app that assembles a simple template (content/table tags). |
+| Example 02 – Intermediate | `DocumentAssemblerSdk.Examples/Example02_Intermediate` | Adds nested data and demonstrates error reporting/out file production. |
+| Example 03 – Advanced | `DocumentAssemblerSdk.Examples/Example03_Advanced` | Handles bigger templates with Repeat + Table combos. |
+| Example 04 – Images | `DocumentAssemblerSdk.Examples/Example04_Images` | Shows Base64 image placeholders with width/height metadata. |
+| Example 05 – Conditional + Else | `DocumentAssemblerSdk.Examples/Example05_ConditionalElse` | Uses generated templates to showcase `<#Else#>` blocks. |
+| Example 06 – Schema Extraction | `DocumentAssemblerSdk.Examples/Example06_SchemaExtraction` | Runs `TemplateSchemaExtractor` against a basic template. |
+| Example 07 – Complex Schema | `DocumentAssemblerSdk.Examples/Example07_ComplexSchemaExtraction` | Stress-tests schema extraction with nested repeats, tables, and images. |
+| Example 08 – Signature Placeholders | `DocumentAssemblerSdk.Examples/Example08_Signature` | Demonstrates the `<Signature>` tag and PDF-ready placeholders. |
+| Example 09 – All Tags | `DocumentAssemblerSdk.Examples/Example09_AllTags` | End-to-end showcase for every tag plus Italian copy and sample JSON data. |
+| Example 10 – Fonts | `DocumentAssemblerSdk.Examples/Example10_Fonts` | Validates font propagation + barcode fonts using custom SDT definitions. |
+| Example 11 – MailMerge ATemplate | `DocumentAssemblerSdk.Examples/Example11_MailMerge_ATemplate` | Ensures MailMerge fields are detected in `ATemplate.docx`. |
+| Example 12 – MailMerge Edited | `DocumentAssemblerSdk.Examples/Example12_MailMerge_Edited` | Validates MailMerge detection in edited Word templates. |
+| Example 13 – MailMerge WordDocxWithALineBreak | `DocumentAssemblerSdk.Examples/Example13_MailMerge_WordDocxWithALineBreak` | Confirms no MailMerge fields exist when content controls are used. |
+| Example 14 – MailMerge template-cc | `DocumentAssemblerSdk.Examples/Example14_MailMerge_TemplateCc` | Ensures CC-only templates yield zero MailMerge hits. |
+| Example 15 – MailMerge template-cc-tag | `DocumentAssemblerSdk.Examples/Example15_MailMerge_TemplateCcTag` | Same as Example14 but with tagged controls for regression coverage. |
 
-Add a project reference to DocumentAssemblerSdk in your .csproj:
+`Example09DataFactory.cs` and `sample-data.json` provide in-repo data generators so tests can assert the assembled output deterministically.
 
-```xml
-<ItemGroup>
-  <ProjectReference Include="../DocumentAssemblerSdk/DocumentAssemblerSdk.csproj" />
-</ItemGroup>
-```
+## Tooling & Helper Scripts
 
-### Basic Usage
+- `PerfMeasurementTool/` – CLI that assembles simple & complex templates ten times, drops the first run, and reports warm performance numbers.
+- `generate_test_docx.py` – Builds DOCX fixtures (`DA270`–`DA272`) used by the test suite to validate nested Conditional/Else flows.
+- `create_example05_templates.py`, `create_example08_signature.py`, `create_example09_all_tags.py`, `create_example10_fonts.py` – Rebuild the example templates directly from XML snippets.
+- `requirements.txt` – Python dependency list (`python-docx==1.1.2`).
+- `test_da272.sh` – Helper script that runs only the DA272 nested conditional tests via `dotnet test --filter`.
+- `debug_test.csx` – Dotnet-script utility that inspects DOCX/XML fixtures during debugging sessions.
 
-```csharp
-using DocumentAssembler.Core;
-using System.Xml;
-
-// Load your template
-var templateDoc = new WmlDocument("Template.docx");
-
-// Load your data
-var xmlDoc = new XmlDocument();
-xmlDoc.Load("Data.xml");
-
-// Assemble the document
-var assembledDoc = DocumentAssembler.AssembleDocument(
-    templateDoc,
-    xmlDoc,
-    out bool templateError
-);
-
-// Save the result
-assembledDoc.SaveAs("Output.docx");
-
-if (templateError)
-{
-    Console.WriteLine("There were errors in the template - check the output document");
-}
-```
+All helper scripts assume the repo root as the working directory.
 
 ## Document Generation Performance Baseline
 
@@ -690,65 +521,87 @@ The CLI uses `PerfMeasurementTool/SimpleTemplate.docx` and `PerfMeasurementTool/
 
 > **This section is a permanent performance baseline. Do not edit these figures unless you replace the snapshot as part of a deliberate optimization milestone.**
 
-Compared to the previous six-run baseline (Simple ≈ 1.0 ms, Complex ≈ 2.0 ms), the complex scenario now completes about **35 % faster** (2.0 ms → 1.3 ms on average), while the simple scenario remains within the same order of magnitude once warm-up jitter is discounted.
+## Building & Requirements
 
-This snapshot was recorded with the XML-style templates shipped in `PerfMeasurementTool`, so the extractor never emits `XmlException` errors while measuring. Keep the numbers above as the reference for future optimizations.
+```bash
+# Install .NET 10 SDK (preview as of today) then:
+dotnet build DocumentAssemblerSdk/DocumentAssemblerSdk.csproj
+```
+
+> 💡 If you're still on .NET 9, set `DOTNET_ROLL_FORWARD=LatestMajor` before running CLI commands so the tooling will pick the latest installed SDK.
+
+## Testing & Quality
+
+```bash
+# Run the entire suite
+DOTNET_ROLL_FORWARD=LatestMajor dotnet test DocumentAssemblerSdk.Tests/DocumentAssemblerSdk.Tests.csproj
+
+# Collect coverage via coverlet / XPlat collector
+DOTNET_ROLL_FORWARD=LatestMajor dotnet test DocumentAssemblerSdk.Tests/DocumentAssemblerSdk.Tests.csproj --collect:"XPlat Code Coverage"
+```
+
+What we test:
+
+- `DocumentAssemblerTests` – >70 theory cases covering headers, nested repeats, tables, invalid XPath, optional defaults, and tracked revision detection.
+- `EnhancedErrorReportingTests`, `MissingFieldsTests`, `ExceptionTests` – Ensure TemplateError summaries, exceptions, and missing-field diagnostics remain stable.
+- `SignatureTagTests` – Validate `<Signature>` attribute validation and placeholder serialization logic.
+- `Example09AllTagsTests` – Guard the showcase template/sample data pair.
+- `TemplateSchemaExtractorTests` – Cover XML tree building, optional propagation, mail merge detection, attribute handling, and huge template scenarios.
+- `OpenXmlRegexTests`, `RevisionAccepterTests`, `RevisionProcessor*Tests`, `UnicodeMapperTests` – Regression tests for the auxiliary utilities we ship.
+
+**Coverage snapshot**: `DocumentAssemblerSdk.Tests/TestResults/5fb1ed5a-85fb-46e0-b0db-41a2274ebe42/coverage.cobertura.xml` reports **85.7 % line coverage (6337/7394 lines)** and **72.5 % branch coverage (1684/2322 branches)** using the `XPlat Code Coverage` collector. Re-run the command above to refresh the report.
+
+Temporary files land under `DocumentAssemblerSdk.Tests/TestResults/` (gitignored) and can be cleaned at any time.
 
 ## Project Structure
 
 ```
 DocumentAssembler/
-├── DocumentAssemblerSdk/           # Main library
-├── DocumentAssemblerSdk.Tests/     # 107 unit tests (100% passing)
-└── README.md                        # This file
+├── DocumentAssembler.sln
+├── DocumentAssemblerSdk/               # Main library (Core, Documents, Exceptions, Utilities)
+├── DocumentAssemblerSdk.Tests/         # xUnit test suite + fixtures + helpers
+├── DocumentAssemblerSdk.Examples/      # 15 sample projects (see table above)
+├── PerfMeasurementTool/                # CLI used for perf baselines
+├── create_example05_templates.py       # Template builders
+├── create_example08_signature.py
+├── create_example09_all_tags.py
+├── create_example10_fonts.py
+├── generate_test_docx.py               # DOCX fixture generator
+├── requirements.txt                    # Python dependencies for generators
+├── test_da272.sh                       # Focused test runner
+├── debug_test.csx                      # dotnet-script debugger helper
+└── README.md                           # This file
 ```
-
-## Building the Project
-
-```bash
-# Build the library
-dotnet build DocumentAssemblerSdk/DocumentAssemblerSdk.csproj
-
-# Run tests (117/117 passing)
-dotnet test DocumentAssemblerSdk.Tests/DocumentAssemblerSdk.Tests.csproj
-```
-
-## Generating Test Documents
-
-For developers who need to create test .docx files with content controls, we provide a Python script:
-
-```bash
-# Generate all test documents
-python3 generate_test_docx.py
-
-# Generate to a specific directory
-python3 generate_test_docx.py /path/to/output/dir
-
-# View help
-python3 generate_test_docx.py --help
-```
-
-**What it generates**:
-- `DA270-ConditionalWithElse.docx` - Basic Conditional with Else using Match
-- `DA271-ConditionalWithElseNotMatch.docx` - Conditional with Else using NotMatch
-- `DA272-NestedConditionalWithElse.docx` - Nested Conditionals with Else
-
-**Requirements**:
-- Python 3.x (no external dependencies needed)
-- Source template: `DocumentAssemblerSdk.Examples/Example01_Basic/TemplateDocument.docx`
-
-The script creates valid .docx files by copying the template structure and injecting custom document.xml with proper content controls. This is useful for creating test files without manually editing Word documents.
 
 ## Dependencies
 
-- **DocumentFormat.OpenXml** (3.3.0) - Core OpenXML functionality
-- **SkiaSharp** (3.119.1) - Image processing for the Image placeholder feature
-- **SkiaSharp.NativeAssets.Linux.NoDependencies** (3.119.1) - Cross-platform support
+- **DocumentFormat.OpenXml** 3.3.0 – Rich OpenXML DOM APIs.
+- **SkiaSharp** 3.119.1 (+ `SkiaSharp.NativeAssets.Linux.NoDependencies`) – Image decoding and measurement, cross-platform safe.
+- **xUnit 2.9.3 + coverlet.collector 6.0.0** – Test + coverage stack.
 
 ## Target Framework
 
-- **.NET 8.0** with nullable reference types enabled
+- **net10.0** across SDK, examples, tests, and tools.
 - **Main Namespace**: `DocumentAssembler.Core`
+
+## Generating Test Documents
+
+For developers who need to create additional DOCX fixtures with content controls:
+
+```bash
+# Generate DA270/DA271/DA272 into the default test folder
+python3 generate_test_docx.py
+
+# Target a custom directory
+python3 generate_test_docx.py /tmp/doc-out
+```
+
+The script copies `Example01_Basic/TemplateDocument.docx`, injects Conditional + Else tags, and saves the result under `DocumentAssemblerSdk.Tests/TestFiles/`.
+
+## Acknowledgements
+
+- ❤️ **[Codeuctivity/OpenXmlPowerTools](https://github.com/Codeuctivity/OpenXmlPowerTools)** – The original authors of DocumentAssembler, `OpenXmlRegex`, revision processors, and the supporting infrastructure that we extracted and modernized here.
+- 🙏 **[chrisfcarroll/MailMerge](https://github.com/chrisfcarroll/MailMerge/tree/main)** – Source of the MailMerge sample templates that inspired the fixtures we validate through Examples 11–15 and the schema extractor tests.
 
 ## License
 
