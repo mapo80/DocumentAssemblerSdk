@@ -505,6 +505,7 @@ def create_notmatch_document():
 
     print(f"✓ Created {output_path}")
 
+
 def main():
     print("Creating Example05_ConditionalElse template documents...")
     print()

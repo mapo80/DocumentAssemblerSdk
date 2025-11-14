@@ -23,6 +23,7 @@ namespace DocumentAssembler.Core
             "Conditional",
             "Else",
             "EndConditional",
+            "Signature",
         };
 
         private static object TransformToMetadata(XNode node, XElement data, TemplateError te)
@@ -320,6 +321,25 @@ namespace DocumentAssembler.Core
                             XsdMarkup =
                               @"<xs:schema attributeFormDefault='unqualified' elementFormDefault='qualified' xmlns:xs='http://www.w3.org/2001/XMLSchema'>
                                   <xs:element name='EndConditional' />
+                                </xs:schema>",
+                        }
+                    },
+                    {
+                        PA.Signature,
+                        new PASchemaSet()
+                        {
+                            XsdMarkup =
+                              @"<xs:schema attributeFormDefault='unqualified' elementFormDefault='qualified' xmlns:xs='http://www.w3.org/2001/XMLSchema'>
+                                  <xs:element name='Signature'>
+                                    <xs:complexType>
+                                      <xs:attribute name='Id' type='xs:string' use='required' />
+                                      <xs:attribute name='Label' type='xs:string' use='optional' />
+                                      <xs:attribute name='Width' type='xs:string' use='optional' />
+                                      <xs:attribute name='Height' type='xs:string' use='optional' />
+                                      <xs:attribute name='PageHint' type='xs:int' use='optional' />
+                                      <xs:attribute name='Optional' type='xs:boolean' use='optional' />
+                                    </xs:complexType>
+                                  </xs:element>
                                 </xs:schema>",
                         }
                     },

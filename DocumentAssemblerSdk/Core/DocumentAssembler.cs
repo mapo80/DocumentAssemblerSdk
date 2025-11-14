@@ -19,21 +19,36 @@ namespace DocumentAssembler.Core
 {
     public partial class DocumentAssembler
     {
-        public static WmlDocument AssembleDocument(WmlDocument templateDoc, XmlDocument data, out bool templateError)
+        public static WmlDocument AssembleDocument(WmlDocument templateDoc, XmlDocument data, out bool templateError) =>
+            AssembleDocument(templateDoc, data, out templateError, out _);
+
+        public static WmlDocument AssembleDocument(WmlDocument templateDoc, XmlDocument data, out bool templateError, out string? templateErrorSummary)
         {
             var xDoc = data.GetXDocument();
             if (xDoc.Root == null)
             {
                 throw new ArgumentException("Data document does not have a root element.", nameof(data));
             }
-            return AssembleDocument(templateDoc, xDoc.Root, out templateError);
+            return AssembleDocument(templateDoc, xDoc.Root, out templateError, out templateErrorSummary);
         }
 
-        public static WmlDocument AssembleDocument(WmlDocument templateDoc, XElement data, out bool templateError)
+        public static WmlDocument AssembleDocument(WmlDocument templateDoc, XElement data, out bool templateError) =>
+            AssembleDocument(templateDoc, data, out templateError, out _);
+
+        public static WmlDocument AssembleDocument(WmlDocument templateDoc, XElement data, out bool templateError, out string? templateErrorSummary)
+        {
+            var assembledDocument = AssembleDocumentInternal(templateDoc, data, out var templateErrorDetails);
+            templateError = templateErrorDetails.HasError;
+            templateErrorSummary = templateErrorDetails.GetErrorSummary();
+            return assembledDocument;
+        }
+
+        private static WmlDocument AssembleDocumentInternal(WmlDocument templateDoc, XElement data, out TemplateError templateErrorDetails)
         {
             var byteArray = templateDoc.DocumentByteArray;
             using var mem = new MemoryStream();
             mem.Write(byteArray, 0, byteArray.Length);
+            var te = new TemplateError();
             using (var wordDoc = WordprocessingDocument.Open(mem, true))
             {
                 if (RevisionAccepter.HasTrackedRevisions(wordDoc))
@@ -41,7 +56,6 @@ namespace DocumentAssembler.Core
                     throw new OpenXmlPowerToolsException("Invalid DocumentAssembler template - contains tracked revisions");
                 }
 
-                var te = new TemplateError();
                 var evaluationContext = new XPathEvaluationContext();
                 foreach (var part in wordDoc.ContentParts())
                 {
@@ -50,8 +64,8 @@ namespace DocumentAssembler.Core
                         ProcessTemplatePart(data, te, part, evaluationContext);
                     }
                 }
-                templateError = te.HasError;
             }
+            templateErrorDetails = te;
             var assembledDocument = new WmlDocument("TempFileName.docx", mem.ToArray());
             return assembledDocument;
         }
@@ -649,6 +663,10 @@ namespace DocumentAssembler.Core
                         return null;
                     }
                 }
+                if (element.Name == PA.Signature)
+                {
+                    return BuildSignaturePlaceholder(element, templateError);
+                }
                 return new XElement(element.Name,
                     element.Attributes(),
                     element.Nodes().Select(n => ContentReplacementTransform(n, data, templateError, owningPart, evaluationContext)));
@@ -941,6 +959,7 @@ namespace DocumentAssembler.Core
             public static readonly XName Conditional = "Conditional";
             public static readonly XName Else = "Else";
             public static readonly XName EndConditional = "EndConditional";
+            public static readonly XName Signature = "Signature";
             public static readonly XName Select = "Select";
             public static readonly XName Optional = "Optional";
             public static readonly XName Align = "Align";
@@ -951,6 +970,9 @@ namespace DocumentAssembler.Core
             public static readonly XName Match = "Match";
             public static readonly XName NotMatch = "NotMatch";
             public static readonly XName Depth = "Depth";
+            public static readonly XName Id = "Id";
+            public static readonly XName Label = "Label";
+            public static readonly XName PageHint = "PageHint";
         }
 
         private class TemplateError

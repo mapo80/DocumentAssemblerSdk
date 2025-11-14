@@ -6,6 +6,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Xml;
+using System.Xml.Linq;
 using Xunit;
 
 namespace DocumentAssemblerSdk.Tests
@@ -220,6 +221,78 @@ namespace DocumentAssemblerSdk.Tests
         }
 
         [Fact]
+        public void ExtractXmlSchema_ShouldNestRepeatChildren_ForOrderTemplate()
+        {
+            var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+            var templatePath = Path.Combine(
+                repoRoot,
+                "DocumentAssembler",
+                "DocumentAssemblerSdk.Examples",
+                "Example03_Advanced",
+                "TemplateDocument.docx");
+
+            if (!File.Exists(templatePath))
+            {
+                return;
+            }
+
+            var templateDoc = new WmlDocument(templatePath);
+            var result = TemplateSchemaExtractor.ExtractXmlSchema(templateDoc);
+
+            Assert.Contains(result.Fields, f => f.XPath.Equals("Orders/Order/ProductDescription", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(result.Fields, f => f.XPath.Equals("Orders/Order/Quantity", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(result.Fields, f => f.XPath.Equals("Orders/Order/OrderDate", StringComparison.OrdinalIgnoreCase));
+
+            var xmlDoc = XDocument.Parse(result.XmlTemplate);
+            var orderElement = xmlDoc.Root?
+                .Descendants("Orders")
+                .Elements("Order")
+                .FirstOrDefault();
+
+            Assert.NotNull(orderElement);
+            Assert.NotNull(orderElement!.Element("ProductDescription"));
+            Assert.NotNull(orderElement.Element("Quantity"));
+            Assert.NotNull(orderElement.Element("OrderDate"));
+        }
+
+        [Fact]
+        public void ExtractXmlSchema_ShouldRepresentAttributesInsideRepeats()
+        {
+            var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+            var templatePath = Path.Combine(
+                repoRoot,
+                "DocumentAssembler",
+                "DocumentAssemblerSdk.Examples",
+                "Example03_Advanced",
+                "TemplateDocument.docx");
+
+            if (!File.Exists(templatePath))
+            {
+                return;
+            }
+
+            var templateDoc = new WmlDocument(templatePath);
+            var result = TemplateSchemaExtractor.ExtractXmlSchema(templateDoc);
+
+            var attributeField = result.Fields.FirstOrDefault(f =>
+                f.XPath.Equals("Orders/Order/@Number", StringComparison.OrdinalIgnoreCase));
+
+            Assert.NotNull(attributeField);
+            Assert.True(attributeField!.IsAttribute);
+
+            var xmlDoc = XDocument.Parse(result.XmlTemplate);
+            var orderElement = xmlDoc.Root?
+                .Descendants("Orders")
+                .Elements("Order")
+                .FirstOrDefault();
+
+            Assert.NotNull(orderElement);
+            Assert.NotNull(orderElement!.Attribute("Number"));
+
+            Assert.Contains("xs:attribute name=\"Number\"", result.XsdMarkup, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
         public void SchemaExtractionResult_ToFormattedXml_ShouldFormatCorrectly()
         {
             // Arrange
@@ -345,6 +418,31 @@ namespace DocumentAssemblerSdk.Tests
             Assert.NotEqual("Data", result.RootElementName); // Should detect actual root like "Customer"
         }
 
+        [Fact]
+        public void ExtractXmlSchema_ShouldIncludeMailMergeFields()
+        {
+            var template = CreateMailMergeTemplate();
+
+            var result = TemplateSchemaExtractor.ExtractXmlSchema(template);
+
+            Assert.Contains(result.Fields, f => f.TagType == "MailMerge" && f.XPath == "Customer/FirstName");
+            Assert.Contains(result.Fields, f => f.TagType == "MailMerge" && f.XPath == "Customer/LastName");
+            Assert.Contains(result.Fields, f => f.TagType == "MailMerge" && f.XPath == "Customer/Address/Line1");
+        }
+
+        [Fact]
+        public void ExtractMailMergeFields_ShouldReturnFieldDefinitions()
+        {
+            var template = CreateMailMergeTemplate();
+
+            var fields = TemplateSchemaExtractor.ExtractMailMergeFields(template);
+
+            Assert.Equal(3, fields.Count);
+            Assert.Contains(fields, f => f.FieldName == "Customer.FirstName" && f.XPath == "Customer/FirstName");
+            Assert.Contains(fields, f => f.FieldName == "Customer.LastName" && f.XPath == "Customer/LastName");
+            Assert.Contains(fields, f => f.FieldName == "Customer.Address.Line1" && f.XPath == "Customer/Address/Line1");
+        }
+
         private static WmlDocument CreateBlankTemplateDocument()
         {
             using var ms = new MemoryStream();
@@ -375,6 +473,40 @@ namespace DocumentAssemblerSdk.Tests
             }
 
             return new WmlDocument($"SchemaDoc-{Guid.NewGuid()}.docx", ms.ToArray());
+        }
+
+        private static WmlDocument CreateMailMergeTemplate()
+        {
+            using var ms = new MemoryStream();
+            using (var wordDoc = WordprocessingDocument.Create(ms, DocumentFormat.OpenXml.WordprocessingDocumentType.Document))
+            {
+                var mainPart = wordDoc.AddMainDocumentPart();
+                var body = new Body();
+                body.Append(CreateSimpleFieldParagraph("Customer.FirstName"));
+                body.Append(CreateComplexFieldParagraph("Customer.LastName"));
+                body.Append(CreateSimpleFieldParagraph("\"Customer.Address.Line1\""));
+                mainPart.Document = new Document(body);
+                mainPart.Document.Save();
+            }
+
+            return new WmlDocument($"MailMerge-{Guid.NewGuid()}.docx", ms.ToArray());
+        }
+
+        private static Paragraph CreateSimpleFieldParagraph(string fieldName)
+        {
+            var simpleField = new SimpleField { Instruction = $" MERGEFIELD {fieldName} " };
+            simpleField.Append(new Run(new Text($"<<{fieldName.Trim('\"')}>>")));
+            return new Paragraph(simpleField);
+        }
+
+        private static Paragraph CreateComplexFieldParagraph(string fieldName)
+        {
+            return new Paragraph(
+                new Run(new FieldChar { FieldCharType = FieldCharValues.Begin }),
+                new Run(new FieldCode($" MERGEFIELD {fieldName} ")),
+                new Run(new FieldChar { FieldCharType = FieldCharValues.Separate }),
+                new Run(new Text($"<<{fieldName.Trim('\"')}>>")),
+                new Run(new FieldChar { FieldCharType = FieldCharValues.End }));
         }
     }
 }

@@ -15,15 +15,6 @@ namespace DocumentAssembler.Core
     /// </summary>
     public class TemplateSchemaExtractor
     {
-        // Regex for custom format: <#Content Select="..."#>
-        private static readonly Regex s_TagRegex = new Regex(@"<#\s*(\w+)\s+([^#]+)#>", RegexOptions.Compiled);
-
-        // Regex for XML format: <Content Select="..." /> or <Content Select="...">
-        // Match tag name, then attributes (everything except > unless in quotes), then optional / before >
-        private static readonly Regex s_XmlTagRegex = new Regex(@"<(Content|Image|Table|Repeat|Conditional)\s+([^>]+?)(\s*/?>)", RegexOptions.Compiled);
-
-        private static readonly Regex s_AttributeRegex = new Regex(@"(\w+)\s*=\s*[""']([^""']+)[""']", RegexOptions.Compiled);
-
         /// <summary>
         /// Result of schema extraction containing XML template and metadata
         /// </summary>
@@ -128,7 +119,17 @@ namespace DocumentAssembler.Core
             /// Additional attributes (Match, NotMatch, Align, etc.)
             /// </summary>
             public Dictionary<string, string> Attributes { get; set; } = new Dictionary<string, string>();
+
+            /// <summary>
+            /// Whether the field targets an attribute (e.g. Order/@Number)
+            /// </summary>
+            public bool IsAttribute { get; set; }
         }
+
+        /// <summary>
+        /// Metadata describing a MailMerge field discovered in a template.
+        /// </summary>
+        public sealed record MailMergeField(string FieldName, string XPath);
 
         /// <summary>
         /// Extracts XML schema from a DOCX template document.
@@ -188,205 +189,429 @@ namespace DocumentAssembler.Core
         private static void ExtractFieldsFromPart(OpenXmlPart part, List<FieldInfo> fields, HashSet<string> repeatingPaths)
         {
             var xDoc = part.GetXDocument();
-            if (xDoc.Root == null) return;
-
-            // Fast extraction from content controls
-            var contentControls = xDoc.Descendants(W.sdt).ToList();
-            foreach (var sdt in contentControls)
+            if (xDoc.Root == null)
             {
-                var text = string.Concat(sdt.Descendants(W.t).Select(t => t.Value))
-                    .Trim()
-                    .Replace('\u201C', '"')
-                    .Replace('\u201D', '"')
-                    .Replace('\u2018', '\'')
-                    .Replace('\u2019', '\'');
+                return;
+            }
 
-                // Handle HTML escaped entities (common in Word documents)
-                text = System.Net.WebUtility.HtmlDecode(text);
+            var contextStack = new Stack<string>();
+            contextStack.Push(string.Empty);
 
-                if (text.StartsWith("<#") && text.EndsWith("#>"))
+            foreach (var tag in EnumerateMetadataTags(xDoc.Root))
+            {
+                if (tag == null)
                 {
-                    ParseAndAddField(text, fields, repeatingPaths);
+                    continue;
                 }
-                else if (text.Contains("<Content") || text.Contains("<Image") || text.Contains("<Table") ||
-                         text.Contains("<Repeat") || text.Contains("<Conditional") || text.Contains("<Else") || text.Contains("<EndRepeat") || text.Contains("<EndConditional"))
-                {
-                    // Also try XML format: <Content ... />, <Else>, etc.
-                    var xmlMatches = s_XmlTagRegex.Matches(text);
-                    foreach (Match match in xmlMatches)
-                    {
-                        ParseAndAddXmlField(match, fields, repeatingPaths);
-                    }
 
-                    // Handle special tags without Select attribute
-                    if (text.Contains("<Else>") || text.Contains("<Else />"))
-                    {
-                        // Else tags don't have Select attribute, skip them
-                    }
-                    if (text.Contains("<EndRepeat>") || text.Contains("<EndRepeat />") ||
-                        text.Contains("<EndConditional>") || text.Contains("<EndConditional />"))
-                    {
-                        // End tags don't have Select attribute, skip them
-                    }
+                switch (tag.Name)
+                {
+                    case "EndRepeat":
+                        if (contextStack.Count > 1)
+                        {
+                            contextStack.Pop();
+                        }
+                        continue;
+                    case "EndConditional":
+                    case "Else":
+                        continue;
+                }
+
+                string? select = null;
+                if (tag.RequiresSelect && !tag.Attributes.TryGetValue("Select", out select))
+                {
+                    continue;
+                }
+
+                var currentContext = contextStack.Peek();
+                var resolvedPath = tag.RequiresSelect ? ResolveXPath(select!, currentContext) : string.Empty;
+
+                switch (tag.Name)
+                {
+                    case "Repeat":
+                        if (string.IsNullOrEmpty(resolvedPath))
+                        {
+                            continue;
+                        }
+                        repeatingPaths.Add(resolvedPath);
+                        fields.Add(CreateFieldInfo(resolvedPath, tag, isRepeating: true));
+                        contextStack.Push(resolvedPath);
+                        break;
+
+                    case "Table":
+                        if (string.IsNullOrEmpty(resolvedPath))
+                        {
+                            continue;
+                        }
+                        repeatingPaths.Add(resolvedPath);
+                        fields.Add(CreateFieldInfo(resolvedPath, tag, isRepeating: true));
+                        break;
+
+                    case "Content":
+                    case "Image":
+                    case "Conditional":
+                    case "Signature":
+                        if (string.IsNullOrEmpty(resolvedPath))
+                        {
+                            continue;
+                        }
+                        fields.Add(CreateFieldInfo(resolvedPath, tag));
+                        break;
                 }
             }
 
-            // Fast extraction from plain paragraphs
-            var paragraphs = xDoc.Descendants(W.p).ToList();
-            foreach (var para in paragraphs)
+            if (xDoc.Root != null)
             {
-                var text = string.Concat(para.Descendants(W.t).Select(t => t.Value))
-                    .Trim();
-
-                // Handle HTML escaped entities (common in Word documents)
-                text = System.Net.WebUtility.HtmlDecode(text);
-
-                // Try custom format first: <#Content ...#>
-                if (text.Contains("<#"))
+                foreach (var mailMergeField in EnumerateMailMergeFields(xDoc.Root))
                 {
-                    var matches = s_TagRegex.Matches(text);
-                    foreach (Match match in matches)
+                    var info = new FieldInfo
                     {
-                        ParseAndAddField(match.Value, fields, repeatingPaths);
+                        XPath = mailMergeField.XPath,
+                        TagType = "MailMerge",
+                        IsOptional = true,
+                        ParentXPath = GetParentPath(mailMergeField.XPath),
+                        Attributes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                        {
+                            ["FieldName"] = mailMergeField.FieldName
+                        },
+                        IsRepeating = false,
+                        IsAttribute = mailMergeField.XPath.Contains("/@") ||
+                                      mailMergeField.XPath.StartsWith("@", StringComparison.Ordinal)
+                    };
+                    fields.Add(info);
+                }
+            }
+        }
+
+        private static FieldInfo CreateFieldInfo(string xpath, ParsedTag tag, bool isRepeating = false)
+        {
+            var attributes = new Dictionary<string, string>(tag.Attributes, StringComparer.OrdinalIgnoreCase);
+            var isOptional = true;
+            if (attributes.TryGetValue("Optional", out var optionalText) &&
+                bool.TryParse(optionalText, out var optionalValue))
+            {
+                isOptional = optionalValue;
+            }
+
+            var normalizedPath = SanitizeXPath(xpath);
+
+            return new FieldInfo
+            {
+                XPath = normalizedPath,
+                TagType = tag.Name,
+                IsOptional = isOptional,
+                ParentXPath = GetParentPath(normalizedPath),
+                Attributes = attributes,
+                IsRepeating = isRepeating,
+                IsAttribute = normalizedPath.Contains("/@") || normalizedPath.StartsWith("@", StringComparison.Ordinal)
+            };
+        }
+
+        private sealed class ParsedTag
+        {
+            public string Name { get; init; } = string.Empty;
+            public Dictionary<string, string> Attributes { get; init; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            public string RawText { get; init; } = string.Empty;
+            public bool RequiresSelect =>
+                Name is "Content" or "Image" or "Table" or "Repeat" or "Conditional" or "Signature";
+        }
+
+        private static readonly HashSet<string> s_SupportedTags = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Content",
+            "Image",
+            "Table",
+            "Repeat",
+            "EndRepeat",
+            "Conditional",
+            "Else",
+            "EndConditional",
+            "Signature",
+        };
+
+        private static IEnumerable<ParsedTag?> EnumerateMetadataTags(XElement root)
+        {
+            foreach (var element in root.Descendants())
+            {
+                if (element.Name == W.sdt)
+                {
+                    foreach (var tag in ExtractTagsFromElement(element))
+                    {
+                        yield return tag;
                     }
                 }
-
-                // Also try XML format: <Content ... />
-                if (text.Contains("<Content") || text.Contains("<Image") || text.Contains("<Table") ||
-                    text.Contains("<Repeat") || text.Contains("<Conditional"))
+                else if (element.Name == W.p &&
+                         !element.Ancestors(W.sdt).Any() &&
+                         !element.Descendants(W.sdt).Any())
                 {
-                    var xmlMatches = s_XmlTagRegex.Matches(text);
-                    foreach (Match match in xmlMatches)
+                    foreach (var tag in ExtractTagsFromElement(element))
                     {
-                        ParseAndAddXmlField(match, fields, repeatingPaths);
+                        yield return tag;
                     }
                 }
             }
         }
 
-        /// <summary>
-        /// Parses an XML format tag and adds it to the fields collection
-        /// </summary>
-        private static void ParseAndAddXmlField(Match match, List<FieldInfo> fields, HashSet<string> repeatingPaths)
+        private static IEnumerable<ParsedTag?> ExtractTagsFromElement(XElement element)
         {
-            var tagName = match.Groups[1].Value; // Content, Image, Table, etc.
-            var attributesText = match.Groups[2].Value;
-
-            // Parse attributes efficiently
-            var attributes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            var attrMatches = s_AttributeRegex.Matches(attributesText);
-            foreach (Match attrMatch in attrMatches)
+            var text = string.Concat(element.Descendants(W.t).Select(t => t.Value));
+            var normalizedText = NormalizeMetadataText(text);
+            if (string.IsNullOrWhiteSpace(normalizedText))
             {
-                attributes[attrMatch.Groups[1].Value] = attrMatch.Groups[2].Value;
+                yield break;
             }
 
-            // Extract Select attribute (XPath)
-            if (!attributes.TryGetValue("Select", out var xpath) || string.IsNullOrWhiteSpace(xpath))
+            foreach (var token in SplitIntoTagStrings(normalizedText))
             {
-                return; // No Select attribute, skip
+                if (TryParseTag(token, out var parsed))
+                {
+                    yield return parsed;
+                }
             }
-
-            // Sanitize XPath: trim and remove any trailing slashes or invalid characters
-            xpath = xpath.Trim().TrimEnd('/', '>');
-
-            // Skip if XPath is invalid after sanitization
-            if (string.IsNullOrWhiteSpace(xpath))
-            {
-                return;
-            }
-
-            // Determine if optional
-            var isOptional = true; // Default is true
-            if (attributes.TryGetValue("Optional", out var optionalStr))
-            {
-                isOptional = !bool.TryParse(optionalStr, out var optVal) || optVal;
-            }
-
-            var field = new FieldInfo
-            {
-                XPath = xpath,
-                TagType = tagName,
-                IsOptional = isOptional,
-                Attributes = attributes
-            };
-
-            // Handle Repeat and Table tags (mark as repeating)
-            if (tagName == "Repeat" || tagName == "Table")
-            {
-                repeatingPaths.Add(xpath);
-                field.IsRepeating = true;
-            }
-
-            fields.Add(field);
         }
 
-        /// <summary>
-        /// Parses a custom format tag and adds it to the fields collection (optimized)
-        /// </summary>
-        private static void ParseAndAddField(string tagText, List<FieldInfo> fields, HashSet<string> repeatingPaths)
+        private static string NormalizeMetadataText(string text)
         {
-            // Remove <# and #> delimiters
-            var content = tagText.Trim();
-            if (content.StartsWith("<#")) content = content.Substring(2);
-            if (content.EndsWith("#>")) content = content.Substring(0, content.Length - 2);
-            content = content.Trim();
-
-            // Fast parse: split on whitespace to get tag name
-            var firstSpace = content.IndexOf(' ');
-            if (firstSpace == -1) return; // No attributes
-
-            var tagName = content.Substring(0, firstSpace);
-            var attributesText = content.Substring(firstSpace + 1);
-
-            // Skip end tags
-            if (tagName.StartsWith("End") || tagName == "Else") return;
-
-            // Parse attributes efficiently
-            var attributes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            var attrMatches = s_AttributeRegex.Matches(attributesText);
-            foreach (Match attrMatch in attrMatches)
+            if (string.IsNullOrWhiteSpace(text))
             {
-                attributes[attrMatch.Groups[1].Value] = attrMatch.Groups[2].Value;
+                return string.Empty;
             }
 
-            // Extract Select attribute (XPath)
-            if (!attributes.TryGetValue("Select", out var xpath) || string.IsNullOrWhiteSpace(xpath))
+            var normalized = text.Trim()
+                .Replace('\u201C', '"')
+                .Replace('\u201D', '"')
+                .Replace('\u2018', '\'')
+                .Replace('\u2019', '\'')
+                .Replace("\r", " ")
+                .Replace("\n", " ");
+
+            return System.Net.WebUtility.HtmlDecode(normalized);
+        }
+
+        private static IEnumerable<string> SplitIntoTagStrings(string text)
+        {
+            var tags = new List<string>();
+            var index = 0;
+            while (index < text.Length)
             {
-                return; // No Select attribute, skip
+                var start = text.IndexOf('<', index);
+                if (start == -1)
+                {
+                    break;
+                }
+
+                if (start + 1 < text.Length && text[start + 1] == '#')
+                {
+                    var end = text.IndexOf("#>", start + 2, StringComparison.Ordinal);
+                    if (end == -1)
+                    {
+                        break;
+                    }
+                    tags.Add(text.Substring(start, end + 2 - start));
+                    index = end + 2;
+                }
+                else
+                {
+                    var end = text.IndexOf('>', start + 1);
+                    if (end == -1)
+                    {
+                        break;
+                    }
+                    tags.Add(text.Substring(start, end + 1 - start));
+                    index = end + 1;
+                }
             }
 
-            // Sanitize XPath: trim and remove any trailing slashes or invalid characters
-            xpath = xpath.Trim().TrimEnd('/', '>');
+            return tags;
+        }
 
-            // Skip if XPath is invalid after sanitization
-            if (string.IsNullOrWhiteSpace(xpath))
+        private static bool TryParseTag(string rawTag, out ParsedTag? parsedTag)
+        {
+            parsedTag = null;
+            if (string.IsNullOrWhiteSpace(rawTag))
             {
-                return;
+                return false;
             }
 
-            // Determine if optional
-            var isOptional = true; // Default is true
-            if (attributes.TryGetValue("Optional", out var optionalStr))
+            var normalized = NormalizeTagMarkup(rawTag);
+            if (string.IsNullOrWhiteSpace(normalized))
             {
-                isOptional = !bool.TryParse(optionalStr, out var optVal) || optVal;
+                return false;
             }
 
-            var field = new FieldInfo
+            XElement element;
+            try
             {
-                XPath = xpath,
-                TagType = tagName,
-                IsOptional = isOptional,
-                Attributes = attributes
+                element = XElement.Parse(normalized);
+            }
+            catch
+            {
+                return false;
+            }
+
+            var name = element.Name.LocalName;
+            if (!s_SupportedTags.Contains(name))
+            {
+                return false;
+            }
+
+            parsedTag = new ParsedTag
+            {
+                Name = name,
+                Attributes = element.Attributes()
+                    .ToDictionary(a => a.Name.LocalName, a => a.Value, StringComparer.OrdinalIgnoreCase),
+                RawText = rawTag
             };
 
-            // Handle Repeat and Table tags (mark as repeating)
-            if (tagName == "Repeat" || tagName == "Table")
+            return true;
+        }
+
+        private static string? NormalizeTagMarkup(string rawTag)
+        {
+            var trimmed = rawTag.Trim();
+            if (string.IsNullOrEmpty(trimmed) || !trimmed.StartsWith("<", StringComparison.Ordinal))
             {
-                repeatingPaths.Add(xpath);
-                field.IsRepeating = true;
+                return null;
             }
 
-            fields.Add(field);
+            if (trimmed.StartsWith("<#", StringComparison.Ordinal))
+            {
+                if (!trimmed.EndsWith("#>", StringComparison.Ordinal))
+                {
+                    return null;
+                }
+
+                var inner = trimmed.Substring(2, trimmed.Length - 4).Trim();
+                if (string.IsNullOrEmpty(inner))
+                {
+                    return null;
+                }
+
+                if (!inner.EndsWith("/>", StringComparison.Ordinal))
+                {
+                    inner = inner.TrimEnd('/');
+                    inner = $"{inner} />";
+                }
+
+                return $"<{inner.TrimStart('<')}";
+            }
+
+            return trimmed;
+        }
+
+        private static string ResolveXPath(string select, string currentContext)
+        {
+            if (string.IsNullOrWhiteSpace(select))
+            {
+                return string.Empty;
+            }
+
+            var trimmed = select.Trim();
+            var isAbsolute = trimmed.StartsWith("/", StringComparison.Ordinal);
+            var isRelative = trimmed.StartsWith(".", StringComparison.Ordinal) ||
+                             trimmed.StartsWith("@", StringComparison.Ordinal) ||
+                             trimmed.StartsWith("..", StringComparison.Ordinal);
+
+            List<string> baseSegments;
+            if (isAbsolute)
+            {
+                baseSegments = new List<string>();
+                trimmed = trimmed.TrimStart('/');
+            }
+            else if (isRelative)
+            {
+                baseSegments = SplitPathSegments(currentContext);
+            }
+            else
+            {
+                baseSegments = new List<string>();
+            }
+
+            var relativeSegments = SplitPathSegments(trimmed);
+            var combined = CombineSegments(baseSegments, relativeSegments);
+            return string.Join("/", combined).Trim('/');
+        }
+
+        private static List<string> CombineSegments(List<string> baseSegments, List<string> relativeSegments)
+        {
+            var combined = new List<string>(baseSegments);
+            foreach (var segment in relativeSegments)
+            {
+                if (segment == ".")
+                {
+                    continue;
+                }
+                if (segment == "..")
+                {
+                    if (combined.Count > 0)
+                    {
+                        combined.RemoveAt(combined.Count - 1);
+                    }
+                    continue;
+                }
+                combined.Add(segment);
+            }
+            return combined;
+        }
+
+        private static List<string> SplitPathSegments(string path)
+        {
+            var segments = new List<string>();
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return segments;
+            }
+
+            var normalized = path.Replace("\\", "/");
+            var tokens = normalized.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var token in tokens)
+            {
+                var trimmed = TrimPredicates(token.Trim());
+                if (string.IsNullOrEmpty(trimmed))
+                {
+                    continue;
+                }
+                segments.Add(trimmed);
+            }
+
+            return segments;
+        }
+
+        private static string TrimPredicates(string segment)
+        {
+            var bracketIndex = segment.IndexOf('[');
+            if (bracketIndex >= 0)
+            {
+                return segment.Substring(0, bracketIndex);
+            }
+            return segment;
+        }
+
+        private static string SanitizeXPath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return string.Empty;
+            }
+
+            var segments = SplitPathSegments(path);
+            return string.Join("/", segments);
+        }
+
+        private static string? GetParentPath(string xpath)
+        {
+            if (string.IsNullOrWhiteSpace(xpath))
+            {
+                return null;
+            }
+
+            var index = xpath.LastIndexOf('/');
+            if (index <= 0)
+            {
+                return null;
+            }
+
+            return xpath.Substring(0, index);
         }
 
         /// <summary>
@@ -402,19 +627,27 @@ namespace DocumentAssembler.Core
 
             foreach (var field in fields)
             {
-                if (field.TagType == "Conditional") continue;
-
                 var parts = field.XPath.Split('/')
                     .Select(p => p.Trim())
                     .Where(p => !string.IsNullOrWhiteSpace(p) && p != "." && !p.StartsWith("-") && !char.IsDigit(p[0]))
                     .ToList();
 
-                if (parts.Count == 0) continue;
+                if (parts.Count == 0)
+                {
+                    continue;
+                }
 
+                string? attributeSegment = null;
+                if (parts[^1].StartsWith("@", StringComparison.Ordinal))
+                {
+                    attributeSegment = parts[^1];
+                }
+
+                var traversalCount = attributeSegment != null ? parts.Count - 1 : parts.Count;
                 var currentNode = root;
                 var pathSegments = new List<string>();
 
-                for (int i = 0; i < parts.Count; i++)
+                for (int i = 0; i < traversalCount; i++)
                 {
                     var part = parts[i];
                     pathSegments.Add(part);
@@ -437,15 +670,26 @@ namespace DocumentAssembler.Core
 
                     currentNode = childNode;
 
-                    var isLeafNode = i == parts.Count - 1;
+                    var isLeafNode = i == traversalCount - 1 && attributeSegment == null;
                     if (isLeafNode)
                     {
                         currentNode.IsOptional = field.IsOptional;
-                        if (field.TagType == "Content" || field.TagType == "Image")
+                        if (field.TagType == "Content" ||
+                            field.TagType == "Image" ||
+                            field.TagType == "MailMerge")
                         {
                             currentNode.IsLeaf = true;
                             currentNode.FieldType = field.TagType;
                         }
+                    }
+                }
+
+                if (attributeSegment != null)
+                {
+                    var attributeName = attributeSegment.Substring(1);
+                    if (!string.IsNullOrWhiteSpace(attributeName))
+                    {
+                        currentNode.AddOrUpdateAttribute(attributeName, field.IsOptional);
                     }
                 }
             }
@@ -490,30 +734,67 @@ namespace DocumentAssembler.Core
         {
             var indentStr = new string(' ', indent * 2);
             var occurrenceAttrs = BuildXsdOccurrenceAttributes(node, isRoot);
+            var hasChildren = node.Children.Count > 0;
+            var hasAttributes = node.Attributes.Count > 0;
+            var isLeaf = node.IsLeaf && !hasChildren;
 
-            if (node.IsLeaf)
+            if (isLeaf && !hasAttributes)
             {
                 var type = node.FieldType == "Image" ? "xs:base64Binary" : "xs:string";
                 sb.AppendLine($"{indentStr}<xs:element name=\"{node.Name}\" type=\"{type}\"{occurrenceAttrs} />");
                 return;
             }
 
-            if (node.Children.Count == 0)
+            if (!hasChildren && !hasAttributes)
             {
                 sb.AppendLine($"{indentStr}<xs:element name=\"{node.Name}\" type=\"xs:string\"{occurrenceAttrs} />");
                 return;
             }
 
+            if (isLeaf && !hasChildren)
+            {
+                var baseType = node.FieldType == "Image" ? "xs:base64Binary" : "xs:string";
+                sb.AppendLine($"{indentStr}<xs:element name=\"{node.Name}\"{occurrenceAttrs}>");
+                sb.AppendLine($"{indentStr}  <xs:complexType>");
+                sb.AppendLine($"{indentStr}    <xs:simpleContent>");
+                sb.AppendLine($"{indentStr}      <xs:extension base=\"{baseType}\">");
+                AppendXsdAttributes(node, sb, indent + 4);
+                sb.AppendLine($"{indentStr}      </xs:extension>");
+                sb.AppendLine($"{indentStr}    </xs:simpleContent>");
+                sb.AppendLine($"{indentStr}  </xs:complexType>");
+                sb.AppendLine($"{indentStr}</xs:element>");
+                return;
+            }
+
             sb.AppendLine($"{indentStr}<xs:element name=\"{node.Name}\"{occurrenceAttrs}>");
             sb.AppendLine($"{indentStr}  <xs:complexType>");
-            sb.AppendLine($"{indentStr}    <xs:sequence>");
-            foreach (var child in node.Children.Values.OrderBy(n => n.Name))
+            if (hasChildren)
             {
-                BuildXsdElement(child, sb, indent + 3, false);
+                sb.AppendLine($"{indentStr}    <xs:sequence>");
+                foreach (var child in node.Children.Values.OrderBy(n => n.Name))
+                {
+                    BuildXsdElement(child, sb, indent + 3, false);
+                }
+                sb.AppendLine($"{indentStr}    </xs:sequence>");
             }
-            sb.AppendLine($"{indentStr}    </xs:sequence>");
+            AppendXsdAttributes(node, sb, indent + 2);
             sb.AppendLine($"{indentStr}  </xs:complexType>");
             sb.AppendLine($"{indentStr}</xs:element>");
+        }
+
+        private static void AppendXsdAttributes(XmlNode node, StringBuilder sb, int indent)
+        {
+            if (node.Attributes.Count == 0)
+            {
+                return;
+            }
+
+            var indentStr = new string(' ', indent * 2);
+            foreach (var attribute in node.Attributes.OrderBy(a => a.Name))
+            {
+                var use = attribute.IsOptional ? "optional" : "required";
+                sb.AppendLine($"{indentStr}<xs:attribute name=\"{attribute.Name}\" type=\"xs:string\" use=\"{use}\" />");
+            }
         }
 
         /// <summary>
@@ -540,62 +821,76 @@ namespace DocumentAssembler.Core
         /// </summary>
         private static void BuildXmlString(XmlNode node, StringBuilder sb, int indent)
         {
-            var indentStr = new string(' ', indent * 2);
-            var hasChildren = node.Children.Count > 0;
-
             if (node.Name == "Data")
             {
-                // Root element
                 sb.AppendLine("<Data>");
                 foreach (var child in node.Children.Values.OrderBy(n => n.Name))
                 {
                     BuildXmlString(child, sb, indent + 1);
                 }
                 sb.Append("</Data>");
+                return;
             }
-            else if (node.IsLeaf)
-            {
-                // Leaf node (Content or Image)
-                var comment = node.IsOptional ? " <!-- Optional -->" : "";
-                if (node.FieldType == "Image")
-                {
-                    comment = node.IsOptional ? " <!-- Optional, Base64 encoded image -->" : " <!-- Base64 encoded image -->";
-                }
-                sb.AppendLine($"{indentStr}<{node.Name}>[value]{comment}</{node.Name}>");
-            }
-            else if (node.IsRepeating)
-            {
-                // Repeating element
-                sb.AppendLine($"{indentStr}<{node.Name}> <!-- Repeating -->");
-                foreach (var child in node.Children.Values.OrderBy(n => n.Name))
-                {
-                    BuildXmlString(child, sb, indent + 1);
-                }
-                sb.AppendLine($"{indentStr}</{node.Name}>");
 
-                // Add second example for clarity
-                sb.AppendLine($"{indentStr}<{node.Name}> <!-- Repeating -->");
+            var indentStr = new string(' ', indent * 2);
+            var attributeMarkup = node.Attributes.Count == 0
+                ? string.Empty
+                : " " + string.Join(" ", node.Attributes.OrderBy(a => a.Name).Select(a => $"{a.Name}=\"[value]\""));
+            var optionalComment = node.IsOptional ? " <!-- Optional -->" : string.Empty;
+            var optionalAttributeComment = BuildOptionalAttributeComment(node);
+
+            if (node.IsLeaf && node.Children.Count == 0)
+            {
+                var placeholder = node.FieldType == "Image" ? "[Base64 image]" : "[value]";
+                var comment = node.FieldType == "Image"
+                    ? (node.IsOptional ? " <!-- Optional, Base64 encoded image -->" : " <!-- Base64 encoded image -->")
+                    : optionalComment;
+                sb.AppendLine($"{indentStr}<{node.Name}{attributeMarkup}>{placeholder}</{node.Name}>{comment}");
+                return;
+            }
+
+            if (node.IsRepeating)
+            {
+                for (var sample = 0; sample < 2; sample++)
+                {
+                    sb.AppendLine($"{indentStr}<{node.Name}{attributeMarkup}> <!-- Repeating -->");
+                    foreach (var child in node.Children.Values.OrderBy(n => n.Name))
+                    {
+                        BuildXmlString(child, sb, indent + 1);
+                    }
+                    sb.AppendLine($"{indentStr}</{node.Name}>");
+                }
+                return;
+            }
+
+            if (node.Children.Count > 0)
+            {
+                sb.AppendLine($"{indentStr}<{node.Name}{attributeMarkup}>");
                 foreach (var child in node.Children.Values.OrderBy(n => n.Name))
                 {
                     BuildXmlString(child, sb, indent + 1);
                 }
-                sb.AppendLine($"{indentStr}</{node.Name}>");
+                sb.AppendLine($"{indentStr}</{node.Name}>{optionalComment}{optionalAttributeComment}");
+                return;
             }
-            else if (hasChildren)
+
+            sb.AppendLine($"{indentStr}<{node.Name}{attributeMarkup} />{optionalComment}{optionalAttributeComment}");
+        }
+
+        private static string BuildOptionalAttributeComment(XmlNode node)
+        {
+            var optionalAttributes = node.Attributes
+                .Where(a => a.IsOptional)
+                .Select(a => a.Name)
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (optionalAttributes.Count == 0)
             {
-                // Container element
-                sb.AppendLine($"{indentStr}<{node.Name}>");
-                foreach (var child in node.Children.Values.OrderBy(n => n.Name))
-                {
-                    BuildXmlString(child, sb, indent + 1);
-                }
-                sb.AppendLine($"{indentStr}</{node.Name}>");
+                return string.Empty;
             }
-            else
-            {
-                // Empty element
-                sb.AppendLine($"{indentStr}<{node.Name} />");
-            }
+
+            return $" <!-- Optional attributes: {string.Join(", ", optionalAttributes)} -->";
         }
 
         /// <summary>
@@ -680,6 +975,179 @@ namespace DocumentAssembler.Core
             public bool IsRepeating { get; set; }
             public bool IsOptional { get; set; }
             public string FieldType { get; set; } = string.Empty;
+            public List<AttributeInfo> Attributes { get; } = new List<AttributeInfo>();
+
+            public void AddOrUpdateAttribute(string name, bool isOptional)
+            {
+                var existing = Attributes.FirstOrDefault(a => string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase));
+                if (existing == null)
+                {
+                    Attributes.Add(new AttributeInfo
+                    {
+                        Name = name,
+                        IsOptional = isOptional
+                    });
+                }
+                else if (!isOptional)
+                {
+                    existing.IsOptional = false;
+                }
+            }
+        }
+
+        private class AttributeInfo
+        {
+            public string Name { get; set; } = string.Empty;
+            public bool IsOptional { get; set; } = true;
+        }
+
+        /// <summary>
+        /// Extracts the list of MailMerge fields (MERGEFIELD) defined in a template.
+        /// </summary>
+        public static IReadOnlyList<MailMergeField> ExtractMailMergeFields(WmlDocument templateDoc)
+        {
+            var results = new List<MailMergeField>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            var byteArray = templateDoc.DocumentByteArray;
+            using var mem = new System.IO.MemoryStream(byteArray, false);
+            using (var wordDoc = WordprocessingDocument.Open(mem, false))
+            {
+                foreach (var part in wordDoc.ContentParts())
+                {
+                    if (part?.RootElement == null)
+                    {
+                        continue;
+                    }
+
+                    var xDoc = part.GetXDocument();
+                    if (xDoc.Root == null)
+                    {
+                        continue;
+                    }
+
+                    foreach (var field in EnumerateMailMergeFields(xDoc.Root))
+                    {
+                        if (seen.Add(field.FieldName))
+                        {
+                            results.Add(field);
+                        }
+                    }
+                }
+            }
+
+            return results;
+        }
+
+        private static IEnumerable<MailMergeField> EnumerateMailMergeFields(XElement root)
+        {
+            foreach (var instruction in EnumerateMailMergeInstructions(root))
+            {
+                var fieldName = ParseMailMergeFieldName(instruction);
+                if (string.IsNullOrWhiteSpace(fieldName))
+                {
+                    continue;
+                }
+
+                var xpath = NormalizeMailMergeXPath(fieldName);
+                if (string.IsNullOrEmpty(xpath))
+                {
+                    continue;
+                }
+
+                yield return new MailMergeField(fieldName, xpath);
+            }
+        }
+
+        private static IEnumerable<string> EnumerateMailMergeInstructions(XElement root)
+        {
+            foreach (var simpleField in root.Descendants(W.fldSimple))
+            {
+                var instruction = (string?)simpleField.Attribute(W.instr);
+                if (!string.IsNullOrWhiteSpace(instruction))
+                {
+                    yield return instruction!;
+                }
+            }
+
+            var capturing = false;
+            var buffer = new StringBuilder();
+
+            foreach (var element in root.Descendants())
+            {
+                if (element.Name == W.fldChar)
+                {
+                    var type = (string?)element.Attribute(W.fldCharType);
+                    if (string.Equals(type, "begin", StringComparison.OrdinalIgnoreCase))
+                    {
+                        capturing = true;
+                        buffer.Clear();
+                    }
+                    else if (string.Equals(type, "separate", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (capturing && buffer.Length > 0)
+                        {
+                            yield return buffer.ToString();
+                        }
+                        capturing = false;
+                        buffer.Clear();
+                    }
+                    else if (string.Equals(type, "end", StringComparison.OrdinalIgnoreCase))
+                    {
+                        capturing = false;
+                        buffer.Clear();
+                    }
+                }
+                else if (capturing && element.Name == W.instrText)
+                {
+                    var text = element.Value;
+                    if (!string.IsNullOrEmpty(text))
+                    {
+                        buffer.Append(text);
+                    }
+                }
+            }
+        }
+
+        private static readonly Regex s_MergeFieldRegex = new(@"MERGEFIELD\s+(?:""(?<quoted>[^""]+)""|(?<simple>[^\s\\]+))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        private static string? ParseMailMergeFieldName(string instruction)
+        {
+            if (string.IsNullOrWhiteSpace(instruction))
+            {
+                return null;
+            }
+
+            var match = s_MergeFieldRegex.Match(instruction);
+            if (!match.Success)
+            {
+                return null;
+            }
+
+            return match.Groups["quoted"].Success
+                ? match.Groups["quoted"].Value.Trim()
+                : match.Groups["simple"].Value.Trim();
+        }
+
+        private static string? NormalizeMailMergeXPath(string fieldName)
+        {
+            if (string.IsNullOrWhiteSpace(fieldName))
+            {
+                return null;
+            }
+
+            var normalized = fieldName.Trim().Trim('"');
+            normalized = normalized.Replace("\\", "/");
+            normalized = normalized.Replace(".", "/");
+            normalized = normalized.Replace(" ", string.Empty);
+            normalized = normalized.Trim('/');
+
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                return null;
+            }
+
+            return SanitizeXPath(normalized);
         }
     }
 }

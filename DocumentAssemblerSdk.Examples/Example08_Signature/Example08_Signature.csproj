@@ -8,7 +8,13 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../DocumentAssemblerSdk/DocumentAssemblerSdk.csproj" />
+    <ProjectReference Include="..\..\DocumentAssemblerSdk\DocumentAssemblerSdk.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="TemplateSignatureDocument.docx">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
 </Project>
