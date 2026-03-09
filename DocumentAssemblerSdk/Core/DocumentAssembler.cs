@@ -111,6 +111,7 @@ namespace DocumentAssembler.Core
 
         private static readonly XName[] s_MetaToForceToBlock = new XName[] {
             PA.Conditional,
+            PA.Else,
             PA.EndConditional,
             PA.Repeat,
             PA.EndRepeat,
