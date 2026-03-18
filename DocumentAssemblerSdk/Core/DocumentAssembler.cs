@@ -111,6 +111,7 @@ namespace DocumentAssembler.Core
 
         private static readonly XName[] s_MetaToForceToBlock = new XName[] {
             PA.Conditional,
+            PA.Else,
             PA.EndConditional,
             PA.Repeat,
             PA.EndRepeat,
@@ -386,6 +387,11 @@ namespace DocumentAssembler.Core
             foreach (var element in xDoc.Descendants(PA.EndConditional).ToList())
             {
                 var error = CreateContextErrorMessage(element, "Error: EndConditional without matching Conditional", te);
+                element.ReplaceWith(error);
+            }
+            foreach (var element in xDoc.Descendants(PA.Else).Where(e => e.Parent?.Name != PA.Conditional).ToList())
+            {
+                var error = CreateContextErrorMessage(element, "Error: Else without matching Conditional", te);
                 element.ReplaceWith(error);
             }
         }
