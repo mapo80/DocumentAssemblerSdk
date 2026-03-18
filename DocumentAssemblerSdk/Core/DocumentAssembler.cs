@@ -389,6 +389,11 @@ namespace DocumentAssembler.Core
                 var error = CreateContextErrorMessage(element, "Error: EndConditional without matching Conditional", te);
                 element.ReplaceWith(error);
             }
+            foreach (var element in xDoc.Descendants(PA.Else).Where(e => e.Parent?.Name != PA.Conditional).ToList())
+            {
+                var error = CreateContextErrorMessage(element, "Error: Else without matching Conditional", te);
+                element.ReplaceWith(error);
+            }
         }
 
         private static object? ContentReplacementTransform(XNode node, XElement data, TemplateError templateError, OpenXmlPart owningPart, XPathEvaluationContext evaluationContext)
